@@ -6,8 +6,9 @@ This is a basic extension original written by the company Print-Technik for the 
 Information about this company you can find at: https://www.c64-wiki.de/wiki/Print-Technik
 
 <br />The latest known Version is a module for the C128/C64, and its called "Help PC-128 Plus C-64".
+<br />A special thanks goes to Johann Klasek, who has support me to get the C64/C128 version, and for his first examiantion on it.
 <br />So far, there are 4 differnt version for the C64 known by me. 
-
+<br />
 ### V1: 
 This should be the initial verson for the C64, the screen mwssage showes "*** HELP C-64 PLUS ***".
 <br />So far i can identify one error at address $8182, there is a "BCS $810C", and should be "BCS $810E"
@@ -32,5 +33,4 @@ This is as far as i know the last version.
 <br />This version has a new hardware design for the modul. It will also mirror a part of the modul to address $DE00.
 <br />At this location the modul has some switching commands, which allows to switch off the modul, and switch between RAM and ROM by changing the GAME and/or EXROM lines. Btw, this is also a nice copy protection.
 <br />The code is rearranged, and optimezed in several places. So far i have not seen some functional changes in the different program parts, except the jumpings to the addresses in $DExx, for switching between RAM and ROM.
-<br />
-<br />A special thanks goes to Johann Klasek, who has support me to get the C64/C128 version, and for his first examiantion on it.
+
