@@ -6,7 +6,9 @@ This is a basic extension original written by the company Print-Technik for the 
 Information about this company you can find at: https://www.c64-wiki.de/wiki/Print-Technik
 
 <br />The latest known Version is a module for the C128/C64, and its called "Help PC-128 Plus C-64".
+<br />
 <br />A special thanks goes to Johann Klasek, who has support me to get the C64/C128 version, and for his first examiantion on it.
+<br />
 <br />So far, there are 4 differnt version for the C64 known by me. 
 <br />
 ### V1: 
