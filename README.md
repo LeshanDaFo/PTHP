@@ -12,7 +12,7 @@ Information about this company you can find at: https://www.c64-wiki.de/wiki/Pri
 <br />So far, there are 4 differnt version for the C64 known by me. 
 <br />
 ### V1: 
-This should be the initial verson for the C64, the screen mwssage showes "*** HELP C-64 PLUS ***".
+This should be the initial verson for the C64, the screen message shows "*** HELP C-64 PLUS ***".
 <br />So far i can identify one error at address $8182, there is a "BCS $810C", and should be "BCS $810E"
 
 ### V2:
