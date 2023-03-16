@@ -1,5 +1,5 @@
 ; History:
 
 ; 2022.03.16    V1.1  =   add comments for copy protection routine in V4
-    The information about the copy protection was providet by Johann Klasek
+    Change part of the code, and insert information provided by Johann Klasek into the source
 ; 2023.03.13    V1.0  =   Initial release 
