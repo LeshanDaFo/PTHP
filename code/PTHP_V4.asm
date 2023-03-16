@@ -1,7 +1,7 @@
 ; ###############################################################
 ; #                                                             #
 ; #  Print Technik Help Plus V4 source code                     #
-; #  Version 1.0 (2023.03.13)                                   #
+; #  Version 1.1 (2023.03.16)                                   #
 ; #  Copyright (c) 2023 Claus Schlereth                         #
 ; #                                                             #
 ; #  This source code is based on the basic extension modul     #
