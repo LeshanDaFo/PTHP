@@ -11,7 +11,7 @@
 ; #  https://github.com/LeshanDaFo/PTHP                         #
 ; #                                                             #
 ; #  Special thanks goes to Johann Klasek who has supported me  #
-; #  to make this source possible                               #
+; #  to make this source possible and contributed to it.        #
 ; #                                                             #
 ; #  This version of the source code is under MIT License       #
 ; ###############################################################
@@ -50,6 +50,7 @@ CHKOUT          = $FFC9                         ; Set Output
 CLRCHN          = $FFCC                         ; Restore I/O Vector
 CHRIN           = $FFCF                         ; Input Vector
 CHROUT          = $FFD2                         ; Output Vector
+LOAD            = $FFD5                         ; Load Vector
 SAVE            = $FFD8                         ; Save Vector
 STOPT           = $FFE1                         ; Test STOP Vector
 NMI             = $FE5E                         ; NMI after found Modul
@@ -68,7 +69,7 @@ reset:
         JSR $FDA3                               ; initialise SID, CIA and IRQ
         LDA #$50                                ; RAM test and find RAM end
         LDY #$FD                                ;
-        JSR $DE09                               ;
+        JSR LDE09                               ; set $55/$56 and JSR ($55) with module off
         JSR $FD15                               ; set Ram end and restore default I/O vectors
         JSR $FF5B                               ; initialise VIC and screen editor, set own colors
         CLI
@@ -88,8 +89,8 @@ L8031   LDX #$00
         LDY #>L9D39                             ; message address high byte
         JSR STROUT                              ; print message
 ; patch basic warm start
-        LDA #$20                                ; new BASIC warm start low byte
-        LDX #$DE                                ; new BASIC warm start high byte
+        LDA #<LDE20                             ; new BASIC warm start low byte
+        LDX #>LDE20                             ; new BASIC warm start high byte
         BNE L804C                               ; 'jmp' set vector
 ; restore basic warm start values
 L8048   LDA #$83                                ; old BASIC warm start low byte
@@ -113,7 +114,7 @@ L8069   CMP L9D94,X                             ; DOS and monitor commands char
         DEX
         BPL L8069
 L8071   STX $3A
-        JMP $DE28                               ; go crunch and interpret
+        JMP LDE28                               ; go crunch and interpret
 --------------------------------- 
 L8076   LDA DMLBYT,x                            ; DOS and monitor commands low byte
         STA $55
@@ -122,7 +123,7 @@ L8076   LDA DMLBYT,x                            ; DOS and monitor commands low b
         JMP ($0055)                             ; execute command
 ; - $8083  basic command GENLINE --------------- 
 GENLINE:
-        JSR     L83E2
+        JSR L83E2
         LDA #$80 
         STA $0132
 L808B   BIT $0132
@@ -151,8 +152,8 @@ L80BD   LDX #$FF
         BCS L8053
         LDY #$9C 
         STY $55
-        LDY #$A4 
-        JMP $DE16
+        LDY #$A4 				; handle new BASIC line
+        JMP LDE16				; JMP $A49C with module off
 --------------------------------- 
 L80CF   CLC
         ADC $0135
@@ -189,36 +190,36 @@ L80FB   LDA L9DD4,X                             ; basic command low byte table
 ; - #810A  Matrix and Variable dump ------------
 ; ------- start $81B1 and $8274 ----------------
 ; ----------------------------------------------
-L810A   JSR STOPT
+L810A   JSR STOPT				; stop pressed?
         BEQ L8116
         LDA $028E
-        CMP #$01 
-        BEQ L810A
+        CMP #$01 				; shift pressed?
+        BEQ L810A				; wait until shift released
 L8116   RTS
 ---------------------------------
-L8117   JSR L810A
-        BNE L8116
-        LDA #$49 
-        LDY #$A8 
-        JMP $DE14
+L8117   JSR L810A				; check for break and wait
+        BNE L8116				; end wait
+        LDA #$49 				; breaking with stop key
+        LDY #$A8 				; $A849 print 'break' and warmstart
+        JMP LDE14				; setup $55/$56 and JMP ($55) with module off
 ---------------------------------
 L8123   JSR CRDO
-        JSR L8117
+        JSR L8117				; break or wait
         LDY #$00 
-        JSR $DE32
+        JSR LDE32				; LDA ($45),Y with module off
         TAX
         BPL L8138
         INY
-        JSR $DE32
+        JSR LDE32				; LDA ($45),Y with module off
         BMI L8138
         RTS
 --------------------------------- 
 L8138   LDY #$00 
-        JSR $DE32
+        JSR LDE32				; LDA ($45),Y with module off
         AND #$7F 
         JSR CHROUT
         INY
-        JSR $DE32
+        JSR LDE32				; LDA ($45),Y with module off
         TAY
         AND #$7F 
         BEQ L814E
@@ -239,10 +240,10 @@ L8161   JSR L8857
         JMP CHROUT
 --------------------------------- 
 L8169   LDY #$00 
-        JSR $DE44
+        JSR LDE44				; LDA ($22),Y with module off
         TAX
         INY
-        JSR $DE44
+        JSR LDE44				; LDA ($22),Y with module off
         TAY
         TXA
         JSR $B395
@@ -251,22 +252,22 @@ L8169   LDY #$00
 --------------------------------- 
 L817D   LDA #$A6 
         LDY #$BB 
-        JSR $DE09
+        JSR LDE09                               ; set $55/$56 and JSR ($55) with module off
         LDY #$01 
         JMP $BDD7
 --------------------------------- 
 L8189   JSR L81AC
         LDY #$02 
-        JSR $DE44
+        JSR LDE44				; LDA ($22),Y with module off
         STA $60
         DEY
-        JSR $DE44
+        JSR LDE44				; LDA ($22),Y with module off
         STA $5F
         DEY
-        JSR $DE44
+        JSR LDE44				; LDA ($22),Y with module off
         STA $26
         BEQ L81AC
-L81A1   JSR $DE00
+L81A1   JSR LDE00				; LDA ($5F),Y with module off
         JSR CHROUT
         INY
         CPY $26
@@ -282,7 +283,7 @@ L81B5   STA $45
         BNE L81BF
         CMP $31
 L81BF   BCC L81C4
-        JMP L848B
+        JMP L848B				; check cartridge and warm start
 --------------------------------- 
 L81C4   LDY #$04 
         ADC #$05 
@@ -290,7 +291,7 @@ L81C4   LDY #$04
         INX
 L81CB   STA $0B
         STX $0C
-        JSR $DE32
+        JSR LDE32				; LDA ($45),Y with module off
         ASL
         TAY
         ADC $0B
@@ -314,11 +315,11 @@ L81EC   DEY
         BNE L81F9
         INC $0205,X
 L81F9   LDA $0205,Y
-        JSR $DE4D
+        JSR LDE4D				; LDA ($0B),Y with module off
         BNE L8208
         INY
         LDA $0205,Y
-        JSR $DE4D
+        JSR LDE4D				; LDA ($0B),Y with module off
 L8208   BCC L821E
         LDA #$00 
         LDY $FD
@@ -350,13 +351,13 @@ L8225   JSR CHROUT
         STA $22
         STX $23
         LDY #$00 
-        JSR $DE32
+        JSR LDE32				; LDA ($45),Y with module off
         BPL L8256
         JSR L8169
         LDA #$02 
         BNE L8268
 L8256   INY
-        JSR $DE32
+        JSR LDE32				; LDA ($45),Y with module off
         BMI L8263
         JSR L817D
         LDA #$05 
@@ -378,7 +379,7 @@ L8278   STA $45
         BNE L8282
         CMP $2F
 L8282   BCC L8287
-        JMP L848B
+        JMP L848B				; check cartridge and warm start
 --------------------------------- 
 L8287   ADC #$02 
         BCC L828C
@@ -417,66 +418,66 @@ L82B1   LDA $45
 ; ----------------------------------------------
 FIND:   INC $7A
         JSR CRUNCH
-        JSR $DE60
+        JSR LDE60				; next CHRGET with module off
         LDY #$00 
-        CMP #$22 
+        CMP #$22 				; '"' string beginning?
         BNE L82CE
-        DEY
+        DEY					; = $FF
         INC $7A
-L82CE   STY $FE
-        LDA $2B
+L82CE   STY $FE					; search in strings ($FF) or code ($00)
+        LDA $2B					; BASIC start
         LDX $2C
 L82D4   STX $23
         STA $22
         STA $5F
         STX $60
-        JSR L8117
-        LDA $028E
+        JSR L8117				; break or wait
+        LDA $028E				; last control key (not used)
         LDY #$00 
-        STY $0F
-        INY
-        JSR $DE00
-        BNE L82EF
-        JMP L848B
+        STY $0F					; clear in-string flag
+        INY					; = 0
+        JSR LDE00				; LDA ($5F),Y with module off
+        BNE L82EF				; end of program?
+        JMP L848B				; check cartridge and warm start
 --------------------------------- 
-L82EF   LDA #$04 
-        !by $2C
-L82F2   LDA #$01
+L82EF   LDA #$04 				; advance 4 bytes
+        !by $2C					; BIT $HHLL: skip following instruction
+L82F2   LDA #$01				; advance 1 byte
         CLC
         ADC $22
         STA $22
         BCC L82FD
         INC $23
 L82FD   LDY #$00 
-        JSR $DE44
+        JSR LDE44				; LDA ($22),Y with module off
         BEQ L8325
-        CMP #$22 
+        CMP #$22 				; '"'
         BNE L830E
         LDA $0F
         EOR #$FF 
-        STA $0F
+        STA $0F					; toggle in-string flag
 L830E   LDA $0F
-        CMP $FE
-        BNE L82F2
-L8314   JSR $DE3B
-        BEQ L832B
+        CMP $FE					; in same area? (code/string)
+        BNE L82F2				; skip if the other one
+L8314   JSR LDE3B				; LDA ($7A),Y with module off
+        BEQ L832B				; search string (empty?)
         STA $0B
-        JSR $DE44
-        CMP $0B
-        BNE L82F2
-        INY
-        BNE L8314
+        JSR LDE44				; LDA ($22),Y with module off
+        CMP $0B					; match char?
+        BNE L82F2				; advance in line
+        INY					; next character
+        BNE L8314				; branch always
 L8325   LDA $22
         LDX $23
         BNE L8332
-L832B   JSR L835B
+L832B   JSR L835B				; found, search string matched
         LDA $5F
         LDX $60
 L8332  CLC
         ADC #$01 
-        BCC L82D4
+        BCC L82D4				; next line
         INX
-        BCS L82D4
+        BCS L82D4				; next line
 ; - $833A  basic command HELP ----------------
 HELP:   LDA $3A
         STA $15
@@ -492,21 +493,21 @@ HELP:   LDA $3A
 L8351   STA $0A
         LDA #$40 
         JSR L835D
-L8358   JMP L848B
+L8358   JMP L848B				; check cartridge and warm start
 --------------------------------- 
 L835B   LDA #$00 
 L835D   STA $0B
         JSR CRDO
         LDY #$02 
         STY $0F
-        JSR $DE00
+        JSR LDE00				; LDA ($5F),Y with module off
         TAX
         INY
-        JSR $DE00
+        JSR LDE00				; LDA ($5F),Y with module off
         JSR INTOUT
         JSR L8857
         LDA #$04 
-        !by $2C
+        !by $2C					; BIT $HHLL: skip following instruction
 L8377   LDA #$01
         CLC
         ADC $5F
@@ -520,7 +521,7 @@ L8382   BIT $0B
         LDA #$01 
         STA $C7
 L838E   LDY #$00 
-        JSR $DE00
+        JSR LDE00				; LDA ($5F),Y with module off
         BNE L8396
         RTS
 --------------------------------- 
@@ -564,22 +565,22 @@ L83D8   LDA ($22),Y
         JSR CHROUT
         INY
         BNE L83D8
-L83E2   JSR $DE60
+L83E2   JSR LDE60				; next CHRGET with module off
         BNE L83EF
         LDX #$0A 
         LDY #$00 
         LDA #$64 
         BNE L8409
 L83EF   LDA #$EB 
-        LDY #$B7 
-        JSR $DE09
+        LDY #$B7 				; $b7eb get parameter poke/wait
+        JSR LDE09                               ; set $55/$56 and JSR ($55) with module off
         LDA $14
         LDY $15
         CPY #$FA 
         BCC L8405
 L83FE   LDA #$08                                ; syntax error 
         LDY #$AF 
-        JMP $DE14
+        JMP LDE14				; setup $55/$56 and JMP ($55) with module off
 --------------------------------- 
 L8405   CPX #$00 
         BEQ L83FE
@@ -590,20 +591,20 @@ L8409   STX $0135
 ; ----------------------------------------------
 ; - $8413  basic command DELETE ----------------
 ; ----------------------------------------------
-DELETE: JSR $DE60
+DELETE: JSR LDE60				; next CHRGET with module off
         BEQ L83FE
         BCC L841E
         CMP #$2D 
         BNE L83FE
 L841E   JSR $A96B
         LDA #$13 
-        LDY #$A6 
-        JSR $DE09
-        JSR $DE66
+        LDY #$A6 				; $a613 search BASIC for temporary integer line number
+        JSR LDE09                               ; set $55/$56 and JSR ($55) with module off
+        JSR LDE66				; CHRGOT with module off
         BEQ L8439
         CMP #$2D 
         BNE L83EF
-        JSR $DE60
+        JSR LDE60				; next CHRGET with module off
         JSR $A96B
         BNE L83FE
 L8439   LDA $14
@@ -618,23 +619,23 @@ L8443   LDX $5F
 L844B   STX $22
         STA $23
         LDY #$01 
-        JSR $DE44
+        JSR LDE44				; LDA ($22),Y with module off
         BEQ L8475
         INY
-        JSR $DE44
+        JSR LDE44				; LDA ($22),Y with module off
         TAX
         INY
-        JSR $DE44
+        JSR LDE44				; LDA ($22),Y with module off
         CMP $15
         BNE L8467
         CPX $14
         BEQ L8469
 L8467   BCS L8475
 L8469   LDY #$00 
-        JSR $DE44
+        JSR LDE44				; LDA ($22),Y with module off
         TAX
         INY
-        JSR $DE44
+        JSR LDE44				; LDA ($22),Y with module off
         BNE L844B
 L8475   LDA $2D
         STA $24
@@ -664,7 +665,7 @@ L849E   LDA ($24),Y                             ; $DE04 ... $DE02
         BPL L849E
 L84A7   LDA #$86                                ; finishing up a command:
         LDY #$E3                                ; basic warm start
-        JMP $DE14                               ; setup $55/$56 and JMP ($55) with module off
+        JMP LDE14                               ; setup $55/$56 and JMP ($55) with module off
 ; ----------------------------------------------
 ; - $84AE  basic command KILL ------------------
 ; ----------------------------------------------
@@ -674,14 +675,14 @@ KILL:   JSR     L8048
 ; ----------------------------------------------
 ENDTRACE:
         LDA #$E4 
-        LDX #$A7 
+        LDX #$A7 				; $a7e4 standard BASIC interpreter loop entry
 L84B5   STA $0308
         STX $0309
-        JMP L848B
+        JMP L848B				; check cartridge and warm start
 ; ----------------------------------------------
 ; - $84BE  basic command LIST PAGE -------------
 ; ----------------------------------------------
-LPAGE:  JSR $DE60
+LPAGE:  JSR LDE60				; next CHRGET with module off
         JSR $A96B
         JSR L90C8
         JSR $ABB7
@@ -693,7 +694,7 @@ L84CA   LDA $5F
         JSR CHROUT
 L84D7   LDX $5F
         LDY #$01 
-        JSR $DE00
+        JSR LDE00				; LDA ($5F),Y with module off
         BEQ L84EF
         JSR L835B
         INC $5F
@@ -708,12 +709,12 @@ L84EF   LDA #$17
 L84F6   JSR GETIN
         CMP #$03 
         BNE L8500
-        JMP $DE20
+        JMP LDE20				; direct mode input basic line and execute
 --------------------------------- 
 L8500   CMP #$0D 
         BNE L850D
         LDY #$01 
-        JSR $DE00
+        JSR LDE00				; LDA ($5F),Y with module off
         BEQ L84F6
         BNE L84CA
 L850D   CMP #$5E 
@@ -738,14 +739,14 @@ L8531   LDA $22
         BNE L8537
         DEC $23
 L8537   DEC $22
-        JSR $DE44
+        JSR LDE44				; LDA ($22),Y with module off
         BNE L8531
         INY
-        JSR $DE44
+        JSR LDE44				; LDA ($22),Y with module off
         CMP $FD
         BNE L852F
         INY
-        JSR $DE44
+        JSR LDE44				; LDA ($22),Y with module off
         CMP $FE
         BNE L852F
         LDX $22
@@ -791,12 +792,12 @@ L858B   JSR STXTP
         STA $22
 L8597   STX $23
         LDY #$01 
-        JSR $DE44
+        JSR LDE44				; LDA ($22),Y with module off
         TAX
         BNE L85AA
 L85A1   JSR L8E83
         JSR CLEARC
-        JMP L848B
+        JMP L848B				; check cartridge and warm start
 --------------------------------- 
 L85AA   INY
         LDA $0133
@@ -805,7 +806,7 @@ L85AA   INY
         LDA $0134
         STA ($22),Y
         LDY #$00 
-        JSR $DE44
+        JSR LDE44				; LDA ($22),Y with module off
         STA $22
         LDA $0133
         LDY $0134
@@ -815,7 +816,7 @@ L85AA   INY
         JMP L8597
 --------------------------------- 
 L85CF   JSR L8FF9
-L85D2   JSR $DE60
+L85D2   JSR LDE60				; next CHRGET with module off
 L85D5   TAX
         BEQ L85CF
         JSR L9012
@@ -824,7 +825,7 @@ L85D5   TAX
         BEQ L85CF
         CMP #$22 
         BNE L85D2
-L85E4   JSR $DE60
+L85E4   JSR LDE60				; next CHRGET with module off
         TAX
         BEQ L85CF
         CMP #$22 
@@ -834,12 +835,12 @@ L85F0   LDA $7A
         STA $28
         LDA $7B
         STA $29
-        JSR $DE60
+        JSR LDE60
         BCS L85D5
         LDY #$6B 
         STY $55
-        LDY #$A9 
-        JSR $DE0B
+        LDY #$A9  				; $A96B get fixed-point number into temporary integer
+        JSR LDE0B				; JMP $A96B with module off
         LDA $2B
         LDX $2C
         STA $22
@@ -849,14 +850,14 @@ L8612   STX $23
         STA $63
         STY $62
         LDY #$02 
-        JSR $DE44
+        JSR LDE44				; LDA ($22),Y with module off
         CMP $14
         BEQ L8637
 L8621   LDY #$01 
-        JSR $DE44
+        JSR LDE44				; LDA ($22),Y with module off
         TAX
         DEY
-        JSR $DE44
+        JSR LDE44				; LDA ($22),Y with module off
         STA $22
         LDA $63
         LDY $62
@@ -864,7 +865,7 @@ L8621   LDY #$01
         JMP L8612
 --------------------------------- 
 L8637   INY
-        JSR $DE44
+        JSR LDE44				; LDA ($22),Y with module off
         CMP $15
         BNE L8621
         JSR L80E1
@@ -876,7 +877,7 @@ L8637   INY
 L864C   LDA $0101,X
         BEQ L8670
         PHA
-        JSR $DE60
+        JSR LDE60				; next CHRGET with module off
         BCC L8668
         LDA $2D
         STA $22
@@ -885,24 +886,24 @@ L864C   LDA $0101,X
         INC $2D
         BNE L8665
         INC $2E
-L8665   JSR $DE78
+L8665   JSR LDE78				; copy ($22) one byte up until $7a/$7b with module off
 L8668   PLA
         LDY #$00 
         STA ($7A),Y
         INX
         BNE L864C
-L8670   JSR $DE60
+L8670   JSR LDE60				; next CHRGET with module off
         BCS L868D
 L8675   LDA $7A
         STA $22
         LDA $7B
         STA $23
-        JSR $DEC3
+        JSR LDEC3				; copy ($22) one byte down until $2d/$2e with module off
         LDA $2D
         BNE L8686
         DEC $2E
 L8686   DEC $2D
-        JSR $DE66
+        JSR LDE66				; CHRGOT with module off
         BCC L8675
 L868D   PHA
         JSR L8E83
@@ -915,15 +916,15 @@ L8699  JMP L85D5
 ; ----------------------------------------------
 ; - $879C  basic command SINGLE STEP -----------
 ; ----------------------------------------------
-S_STEP:  LDA #$00 
-         !by $2C
+S_STEP: LDA #$00 
+        !by $2C					; BIT $HHLL: skip following instruction
 ; ----------------------------------------------
 ; - $869F  basic command TRACE -----------------
 ; ----------------------------------------------
 TRACE:  LDA #$80
-        STA $0130
-        LDA #$98 
-        LDX #$DE 
+        STA $0130				; trace flag
+        LDA #<LDE98				; hook $0308/$0309
+        LDX #>LDE98
         JMP L84B5
 --------------------------------- 
 L86AB   LDA $39
@@ -995,7 +996,7 @@ L871C   LDA $DA
         STA $5F
         LDA $3E
         STA $60
-        JSR $DE00
+        JSR LDE00				; LDA ($5F),Y with module off
         BEQ L873C
         LDX #$01 
 L873C   TXA
@@ -1007,7 +1008,7 @@ L873C   TXA
         STA $60
         JSR L838E
         JSR CRDO
-        BIT $0130
+        BIT $0130				; trace flag set?
         BMI L8760
 L8752   JSR STOPT
         BEQ L877B
@@ -1022,12 +1023,12 @@ L8760   LDA #$03
         LDA #$00 
 L876B   STA $0122
         LDY #$78 
-L8770   DEX
-        BNE L8770
+-       DEX
+        BNE -
         DEY
-        BNE L8770
+        BNE -
         DEC $0122
-        BPL L8770
+        BPL -
 L877B   PLA
         STA $0286
         PLA
@@ -1040,60 +1041,60 @@ L877B   PLA
         STA $D1
 L878B   LDA #$E4                                ; execute statement
         LDY #$A7 
-        JMP $DE14
+        JMP LDE14				; setup $55/$56 and JMP ($55) with module off
 ; ----------------------------------------------
 ; - #8801  basic command APPEND ----------------
 ; ----------------------------------------------
 APPEND  INC $7A
         LDA #$D4 
-        LDY #$E1 
-        JSR $DE09
-        LDX $2B
+        LDY #$E1 				; $e1d4 get parameters for LOAD/SAVE
+        JSR LDE09                               ; set $55/$56 and JSR ($55) with module off
+        LDX $2B					; BASIC start
         LDA $2C
-L879F   STX $5F
+L879F   STX $5F					; BASIC text pointer
         STA $60
         LDY #$00 
-        JSR $DE00
-        TAX
-        INY
-        JSR $DE00
-        BNE L879F
-        LDY #$D5 
+        JSR LDE00				; LDA ($5F),Y with module off
+        TAX					; BASIC line link low
+        INY					; BASIC line link high
+        JSR LDE00				; LDA ($5F),Y with module off
+        BNE L879F				; not end of program
+        LDY #<LOAD
         STY $55
-        LDY #$FF 
+        LDY #>LOAD
         STY $56
-        LDY $60
-        LDX $5F
+        LDY $60					; load address high
+        LDX $5F					; load address low
         STA $0133
         STA $0A
-        STA $B9
-        JSR $DEE1
+        STA $B9					; secondary address
+        JSR LDEE1				; do LOAD with module off
         JMP L88E4
 ; ----------------------------------------------
 ; - $88C8 -- print free memory -----------------
 ; ----------------------------------------------
-PRTFRE: JSR $B526
+PRTFRE: JSR $B526				; garbage collection
         SEC
-        LDA $33
-        SBC $31
+        LDA $33					; bottom of string space
+        SBC $31					; minus end of arrays
         TAX
         LDA $34
         SBC $32
-        JSR INTOUT
-        JMP L848B
+        JSR INTOUT				; print free bytes as unsigned integer
+        JMP L848B				; check cartridge and warm start
 ; ----------------------------------------------
 ; - $87DB -- close command and file ------------
 ; ---------------------------------------------- 
 CLFILE: JSR CLRCHN
         LDA #$FF 
         JSR CLOSE
-        JMP L848B
+        JMP L848B				; check cartridge and warm start
 --------------------------------- 
-L87E6   JSR $DE60
+L87E6   JSR LDE60				; next CHRGET with module off
         BEQ L87F2
         LDA #$9E 
-        LDY #$B7 
-        JMP $DE09
+        LDY #$B7 				; $b79e get byte parameter
+        JMP LDE09                               ; set $55/$56 and JSR ($55) with module off
 --------------------------------- 
 L87F2   RTS
 ; ----------------------------------------------
@@ -1109,32 +1110,32 @@ OPNFILE:
         JSR OPEN
         LDX #$FF 
         JSR $E118
-        JMP $DE20
+        JMP LDE20				; direct mode input basic line and execute
 ; ----------------------------------------------
 ; - $880B jump in for convert - "!$", "!#" -----
 ; ----------------------------------------------
 CONVERT:
-        JSR $DE60
+        JSR LDE60				; next CHRGET with module off
         CMP #$24 
         BNE L8825
 ; convert dec to hex ---------------------------
-        JSR $DE60
+        JSR LDE60				; next CHRGET with module off
         JSR FRMNUM
         JSR GETADR
         JSR L9B2B
         TYA
         JSR L9B2B
-        JMP L848B
+        JMP L848B				; check cartridge and warm start
 ; - $888C - check for # ------------------------ 
 L8825   CMP #$23 
         BEQ L882C
-        JMP $DE20
+        JMP LDE20				; direct mode input basic line and execute
 ; - $8893 - convert hex to dec ----------------- 
 L882C   LDA #$00 
         STA $62
         STA $63
         LDX #$05 
-L8834   JSR $DE60
+L8834   JSR LDE60				; next CHRGET with module off
         BEQ L884E
         DEX
         BNE L883F
@@ -1149,7 +1150,7 @@ L8844   ROL
         BNE L8844
         BEQ L8834
 L884E   JSR INTOUT1
-        JMP L848B
+        JMP L848B				; check cartridge and warm start
 --------------------------------- 
 L8854   JSR L8857
 L8857   LDA #$20 
@@ -1179,7 +1180,7 @@ SAVEPRG:
 L8875   LDX $2D
         LDY $2E
         LDA #$2B 
-        JSR $DE70
+        JSR LDE70				; SAVE with module off
         BCC L8883
         JMP EREXIT
 --------------------------------- 
@@ -1187,7 +1188,7 @@ L8883   JSR L8A78
         LDA $0100
         CMP #$36 
         BEQ L8890
-L888D   JMP L848B
+L888D   JMP L848B				; check cartridge and warm start
 --------------------------------- 
 L8890   LDA $0101
         CMP #$33 
@@ -1196,15 +1197,15 @@ L8890   LDA $0101
         LDY #>L9D7C 
         JSR STROUT
 L889E   JSR GETIN
-        CMP #$4E ; "n"
+        CMP #$4E				; "n"
         BEQ L888D
-        CMP #$59 ; 'y'
+        CMP #$59				; 'y'
         BEQ L88AD
-        CMP #$4A ; "j"
+        CMP #$4A				; "j"
         BNE L889E
-L88AD   LDA #$53 ; "s"
+L88AD   LDA #$53				; "s"
         STA $01FF
-        LDA #$3A ; ":"
+        LDA #$3A				; ":"
         CMP $0202
         BNE L88BB
         LDA #$20 
@@ -1223,7 +1224,7 @@ L88BB   STA $0200
 ; - $88D5 load prg relative --------------------
 ; ----------------------------------------------
 LDREL:  LDA #$00 
-        !by $2C
+        !by $2C					; BIT $HHLL: skip following instruction
 ; ----------------------------------------------
 ; - $88D8 load and run prg relative ------------
 ; ----------------------------------------------
@@ -1246,14 +1247,14 @@ L88F3   STX $2D
         BMI L8903
         LDA #$AB                                ; print 'ready'   
         LDY #$E1 
-        JMP $DE14
+        JMP LDE14				; setup $55/$56 and JMP ($55) with module off
 --------------------------------- 
 L8903   JSR $A659
         JSR L8E83
         JSR STXTP
         LDA #$AE                                ; PERFORM NEXT STATEMENT 
         LDY #$A7 
-        JMP $DE14
+        JMP LDE14				; setup $55/$56 and JMP ($55) with module off
 ; ----------------------------------------------
 ; - $8913 Verify "<" ---------------------------
 ; ---------------------------------------------- 
@@ -1262,7 +1263,7 @@ VERIFY: LDA #$00
         LDA #$01 
         JSR L8957
         JSR $E17E
-        JMP L848B
+        JMP L848B				; check cartridge and warm start
 ; ----------------------------------------------
 ; - $8922 load prg absolut ---------------------
 ; ---------------------------------------------- 
@@ -1388,7 +1389,7 @@ L8A14   LDA #$60
         BEQ L8A2D
         LDX $0134
         JSR CHKOUT
-L8A2D   JMP L848B
+L8A2D   JMP L848B				; check cartridge and warm start
 ; ----------------------------------------------
 ; - $8A30  set IO number -----------------------
 ; ---------------------------------------------- 
@@ -1400,7 +1401,7 @@ SETIONO:
         CPX #$10 
         BCS L8A43
         STX $0131
-        JMP L848B
+        JMP L848B				; check cartridge and warm start
 --------------------------------- 
 L8A43   JMP L883C
 ; ----------------------------------------------
@@ -1417,11 +1418,11 @@ RDCH15: LDY #$01
         PLA
         JSR L9B2B
         JSR CRDO
-        JMP L848B
+        JMP L848B				; check cartridge and warm start
 --------------------------------- 
 L8A63   JSR L892D
         JSR L8AC0
-        JMP L848B
+        JMP L848B				; check cartridge and warm start
 ; ----------------------------------------------
 ; - $8A6C read disk channel --------------------
 ; ----------------------------------------------
@@ -1429,7 +1430,7 @@ RDDCH:  LDY #$01
         LDA ($7A),Y
         BNE L8A63
 L8A72   JSR L8A78
-        JMP L848B
+        JMP L848B				; check cartridge and warm start
 --------------------------------- 
 L8A78   JSR L8938
         JSR L8AB3
@@ -1547,7 +1548,7 @@ L8B53   CMP #$40                                ; "@" transfer
         LDA #$00 
 L8B5C   CMP #$3D                                ; "=" exit monitor
         BNE L8B63
-        JMP L848B
+        JMP L848B				; check cartridge and warm start
 --------------------------------- 
 L8B63   JSR $007C
         JSR L885C
@@ -1946,11 +1947,11 @@ L8E77   CPX #$F1
         JSR L8E8D
         JSR L8ED3
 L8E83   LDA #$33 
-        LDY #$A5 
-        JMP $DE09
+        LDY #$A5 				; $a533 rebuild BASIC line chaining
+        JMP LDE09                               ; set $55/$56 and JSR ($55) with module off
 --------------------------------- 
 L8E8A   LDA #$01 
-        !by $2C
+        !by $2C					; BIT $HHLL: skip following instruction
 L8E8D   LDA #$00
         STA $0112
         JSR L8EA0
@@ -1964,19 +1965,19 @@ L8E9B   PLA
 --------------------------------- 
 L8EA0   JSR STXTP
 L8EA3   JSR L8FF9
-L8EA6   JSR $DE60
+L8EA6   JSR LDE60				; next CHRGET with module off
 L8EA9   TAX
         BEQ L8EA3
         JSR L9044
         BCC L8EA9
         JSR L9012
         BNE L8EA6
-L8EB6   JSR $DE60
+L8EB6   JSR LDE60				; next CHRGET with module off
         BCS L8EA9
         JSR L90BF
         BCS L8ECC
         JSR L902B
-L8EC3   JSR $DE66
+L8EC3   JSR LDE66				; CHRGOT with module off
         CMP #$2C 
         BNE L8EA9
         BEQ L8EB6
@@ -2009,7 +2010,7 @@ L8F01   LDY #$FF
         LDA $3E
         STA $23
 L8F0B   INY
-        JSR $DE44
+        JSR LDE44				; LDA ($22),Y with module off
         BNE L8F0B
         TYA
         CLC
@@ -2018,7 +2019,7 @@ L8F0B   INY
         CMP $FD
         BCS L8EFA
         LDY #$02 
-        JSR $DE32
+        JSR LDE32				; LDA ($45),Y with module off
         CMP #$FF 
         BEQ L8EFA
         LDY #$00 
@@ -2041,7 +2042,7 @@ L8F43   LDX #$00
         STX $0112
         INC $0114
 L8F4F   LDY #$00 
-L8F51   JSR $DE3B
+L8F51   JSR LDE3B				; LDA ($7A),Y with module off
         BNE L8F59
         JMP L8EE1
 --------------------------------- 
@@ -2051,7 +2052,7 @@ L8F59   INC $7A
 L8F5F   INC $0114
         CMP #$22 
         BNE L8F7F
-L8F66   JSR $DE3B
+L8F66   JSR LDE3B				; LDA ($7A),Y with module off
         BNE L8F70
         INC $0113
         BNE L8F51
@@ -2086,17 +2087,17 @@ L8FA3   CMP #$8F
         INC $45
         BNE L8FB4
         INC $46
-L8FB4   JSR $DE3B
+L8FB4   JSR LDE3B				; LDA ($7A),Y with module off
 L8FB7   BEQ L8F51
 L8FB9   INC $7A
         BNE L8FBF
         INC $7B
-L8FBF   JSR $DE3B
+L8FBF   JSR LDE3B				; LDA ($7A),Y with module off
         BNE L8FB9
         BEQ L8F9A
 L8FC6   CMP #$83 
         BNE L8F51
-L8FCA   JSR $DE3B
+L8FCA   JSR LDE3B				; LDA ($7A),Y with module off
         BEQ L8F51
         INC $7A
         BNE L8FD5
@@ -2106,7 +2107,7 @@ L8FD5   INC $0114
         BEQ L8FB7
         CMP #$22 
         BNE L8FCA
-L8FE0   JSR $DE3B
+L8FE0   JSR LDE3B				; LDA ($7A),Y with module off
         BNE L8FEA
         INC $0113
         BNE L8FCA
@@ -2118,23 +2119,23 @@ L8FF0   INC $0114
         BNE L8FE0
         BEQ L8FCA
 L8FF9   LDY #$02 
-        JSR $DE3B
+        JSR LDE3B				; LDA ($7A),Y with module off
         BNE L9003
         PLA
         PLA
         RTS
 --------------------------------- 
 L9003   INY
-        JSR $DE3B
+        JSR LDE3B				; LDA ($7A),Y with module off
         STA $39
         INY
-        JSR $DE3B
+        JSR LDE3B				; LDA ($7A),Y with module off
         STA $3A
         JMP $A8FB
 --------------------------------- 
 L9012   CMP #$CB                                ; go
         BNE L901C
-        JSR $DE60
+        JSR LDE60				; next CHRGET with module off
         CMP #$A4                                ; to
         RTS
 --------------------------------- 
@@ -2148,7 +2149,7 @@ L901C   CMP #$A7                                ; then
 L902A   RTS
 --------------------------------- 
 L902B   LDA #<L9D63
-        LDY #>L9D63 
+        LDY #>L9D63 				; undef'd statement error
         STY $0112
         JSR STROUT
         JSR $BDC2
@@ -2160,34 +2161,34 @@ L903B   LDX $7A
         STX $3E
         RTS
 --------------------------------- 
-L9044   CMP #$22 
+L9044   CMP #$22 				; '"'
         BNE L9061
         LDY #$00 
         INC $7A
         BNE L9050
         INC $7B
-L9050   JSR $DE3B
-        BEQ L906C
-        INC $7A
+L9050   JSR LDE3B				; LDA ($7A),Y with module off
+        BEQ L906C				; end of BASIC line?
+        INC $7A					; skip string character
         BNE L905B
         INC $7B
-L905B   CMP #$22 
+L905B   CMP #$22 				; skip until '"'
         BNE L9050
         BEQ L906C
-L9061   CMP #$8F 
+L9061   CMP #$8F 				; REM token
         BNE L9071
         LDA #$3B 
-        LDY #$A9 
-        JSR $DE09
-L906C   JSR $DE66
+        LDY #$A9 				; $a93b perform REM
+        JSR LDE09                               ; set $55/$56 and JSR ($55) with module off
+L906C   JSR LDE66				; CHRGOT with module off
         CLC
         RTS
 --------------------------------- 
-L9071   CMP #$83 
+L9071   CMP #$83 				; DATA token
         BNE L907F
         LDA #$F8 
-        LDY #$A8 
-        JSR $DE09
+        LDY #$A8 				; $a8f8 perform DATA
+        JSR LDE09                               ; set $55/$56 and JSR ($55) with module off
         JMP L906C
 --------------------------------- 
 L907F   SEC
@@ -2226,32 +2227,32 @@ L90B5   CLC
         ADC $22
         BCC L90BC
         DEC $23
-L90BC   JMP $DEB0
+L90BC   JMP $DEB0				; copy ($22) to ($24) X pages upwards with module off
 --------------------------------- 
 L90BF   LDY #$6B 
         STY $55
-        LDY #$A9 
-        JSR $DE0B
+        LDY #$A9 				; $A96B get fixed-point number into temporary integer
+        JSR LDE0B				; JMP $A96B with module off
 L90C8   LDA $2B
         LDX $2C
 L90CC   LDY #$01 
         STA $5F
         STX $60
-        JSR $DE00
+        JSR LDE00				; LDA ($5F),Y with module off
         BEQ L90F7
         LDY #$03 
-        JSR $DE00
+        JSR LDE00				; LDA ($5F),Y with module off
         CMP $15
         BNE L90E6
         DEY
-        JSR $DE00
+        JSR LDE00				; LDA ($5F),Y with module off
         CMP $14
 L90E6   BCC L90EB
         BNE L90F7
         RTS
 --------------------------------- 
 L90EB   LDY #$00 
-        JSR $DE00
+        JSR LDE00				; LDA ($5F),Y with module off
         CMP $5F
         BCS L90CC
         INX
@@ -2275,7 +2276,7 @@ RENEW:  LDA $2B
 L910F   LDY #$03 
 L9111   INY
         BEQ L9156
-        JSR $DE00
+        JSR LDE00				; LDA ($5F),Y with module off
         BNE L9111
         TYA
         SEC
@@ -2296,10 +2297,10 @@ L9129   BCS L9156
         STA ($5F),Y
         STX $5F
         STA $60
-        JSR $DE00
+        JSR LDE00				; LDA ($5F),Y with module off
         BNE L910F
         DEY
-        JSR $DE00
+        JSR LDE00				; LDA ($5F),Y with module off
         BNE L910F
 L9142   CLC
         LDA $5F
@@ -2310,7 +2311,7 @@ L9142   CLC
 L914C   STA $2D
         STY $2E
         JSR CLEARC
-        JMP L848B
+        JMP L848B				; check cartridge and warm start
 --------------------------------- 
 L9156   TYA
         STA ($5F),Y
@@ -2331,7 +2332,7 @@ L9168   LDA L9BCE,X                             ; copy part of assembler to RAM
         DEX
         BPL L9168
         LDA #<L9C15 
-        LDY #>L9C15 
+        LDY #>L9C15				; "programname  :"
         JSR STROUT
         LDX #$00 
 L917A   JSR CHRIN
@@ -2344,10 +2345,10 @@ L917A   JSR CHRIN
 L9189   STX $B7
         TXA
         BNE L9191
-        JMP L848B
+        JMP L848B				; check cartridge and warm start
 --------------------------------- 
 L9191   LDA #<L9C26 
-        LDY #>L9C26 
+        LDY #>L9C26 				; "printout mode:"
         JSR STROUT
         LDX #$00 
         STX $57
@@ -2416,19 +2417,19 @@ L920D   LDA $29
         BNE L91C3
 L9220   JSR L9422
 L9223   LDA #<L9C37 
-        LDY #>L9C37 
+        LDY #>L9C37 				; "   lines:"
         JSR STROUT
         LDA $32
         LDX $31
         JSR INTOUT
         LDA #<L9C3E 
-        LDY #>L9C3E 
+        LDY #>L9C3E 				; "   symbols:"
         JSR STROUT
         LDA $30
         LDX $2F
         JSR INTOUT
-        LDA #<L9C4A 
-        LDY #>L9C4A 
+        LDA #<L9C4A
+        LDY #>L9C4A 				; "   errors:"
         JSR STROUT
         LDA #$00 
         LDX $40
@@ -2462,7 +2463,7 @@ L927E   BCC L9296
         JSR L9302
 L9288   JSR L9425
         BCS L9288
-L928D   JMP L848B
+L928D   JMP L848B				; check cartridge and warm start
 --------------------------------- 
 L9290   JSR L92D2
         JMP L9266
@@ -2716,7 +2717,7 @@ L9465   JSR CHROUT
         CPX #$3C 
         BCC L9465
         LDA #<L9C55 
-        LDY #>L9C55 
+        LDY #>L9C55				; "page:"
         JSR STROUT
         LDA #$00 
         STA $68
@@ -3793,195 +3794,162 @@ L9DD4   !by <APPEND,<DELETE,<ENDTRACE,<FIND,<GENLINE,<HELP,<KILL,<LPAGE
 L9DE4   !by >APPEND,>DELETE,>ENDTRACE,>FIND,>GENLINE,>HELP,>KILL,>LPAGE
         !by >M_DUMP,>RENUMBER,>S_STEP,>TRACE,>V_DUMP,>UNDEF,>COMPACTOR,>RENEW
 
-        !by $00,$00,$00,$00,$00,$00,$00,$00
-        !by $00,$00,$00,$00
+	!align 255, 0, 0
 
-; this part will be mirrored to $DE00 ------------
-        DEC $01
+!pseudopc $DE00 {
+
+; thsi part will be mirrored to $DE00 ------------
+LDE00   DEC $01					; no cartridge, no BASIC ROM, RAM below readable
+
         LDA ($5F),Y
         PHA
-        INC $01
+        INC $01					; activate cartridge and BASIC ROM
         PLA
         RTS
 --------------------------------- 
-        STA $55
-        JSR $DE16
-        LDY #$80 
-        STY $DE09
+LDE09   STA $55					; set $55,
+LDE0B   JSR LDE16				; set $56 and JMP ($55) with module off
+        LDY #$80
+        STY LDE09				; module on, again
         RTS
 --------------------------------- 
-        STA $55
-        STY $56
+LDE14   STA $55
+LDE16   STY $56
         LDY #$F2 
-        STY $DE14
-        JMP ($0055)
+        STY LDE14				; module off
+LDE1D   JMP ($0055)
 --------------------------------- 
-        LDA #$04 
-        STA $DE20
-        JMP L8053
+LDE20   LDA #$04 
+        STA LDE20				; module on
+        JMP L8053				; direct mode: read BASIC line from keyboard and execute
 --------------------------------- 
-        DEX
-        STX $DE28
-        JSR CRUNCH
-        JMP $A7E1  ; GONE
+LDE28   DEX
+        STX LDE28				; module off
+        JSR CRUNCH				; Crunch BASIC tockens (vector $0304)
+        JMP $A7E1				; start into interpreter loop (vector $0308)
 --------------------------------- 
-        DEC $01
+LDE32   DEC $01					; no cartridge, no BASIC ROM, RAM below readable
         LDA ($45),Y
         PHA
-        INC $01
+        INC $01					; activate cartridge and BASIC ROM
         PLA
         RTS
 --------------------------------- 
-        DEC $01
+LDE3B   DEC $01					; no cartridge, no BASIC ROM, RAM below readable
         LDA ($7A),Y
         PHA
-        INC $01
+        INC $01					; activate cartridge and BASIC ROM
         PLA
         RTS
 --------------------------------- 
-        DEC $01
+LDE44   DEC $01					; no cartridge, no BASIC ROM, RAM below readable
         LDA ($22),Y
         PHA
-        INC $01
+        INC $01					; activate cartridge and BASIC ROM
         PLA
         RTS
 --------------------------------- 
-        DEC $01
+LDE4D   DEC $01					; no cartridge, no BASIC ROM, RAM below readable
         CMP ($0B),Y
         PHP
-        INC $01
+        INC $01					; activate cartridge and BASIC ROM
         PLP
         RTS
 --------------------------------- 
-        BRK
+	!fill 10, 0
 --------------------------------- 
-        BRK
---------------------------------- 
-        BRK
---------------------------------- 
-        BRK
---------------------------------- 
-        BRK
---------------------------------- 
-        BRK
---------------------------------- 
-        BRK
---------------------------------- 
-        BRK
---------------------------------- 
-        BRK
---------------------------------- 
-        BRK
---------------------------------- 
-        INC $7A
-        BNE L9E66
+LDE60   INC $7A					; increment CHRGET pointer
+        BNE +
         INC $7B
-L9E66   DEC $01
++
+LDE66   DEC $01					; no cartridge, no BASIC ROM, RAM below readable
         JSR CHRGOT
         PHP
-        INC $01
+        INC $01					; activate cartridge and BASIC ROM
         PLP
         RTS
 --------------------------------- 
-        DEC $01
+LDE70   DEC $01					; no cartridge, no BASIC ROM, RAM below readable
         JSR SAVE
-        INC $01
+        INC $01					; activate cartridge and BASIC ROM
         RTS
 --------------------------------- 
-        DEC $01
-L9E7A   LDA $22
-        BNE L9E80
+; copy ($22) one byte up until $7a/$7b with module off
+LDE78   DEC $01					; no cartridge, no BASIC ROM, RAM below readable
+-       LDA $22
+        BNE +
         DEC $23
-L9E80   DEC $22
++       DEC $22
         LDY #$00 
         LDA ($22),Y
         INY
         STA ($22),Y
         LDA $22
         CMP $7A
-        BNE L9E7A
+        BNE -
         LDA $23
         CMP $7B
-        BNE L9E7A
-        INC $01
+        BNE -
+        INC $01					; activate cartridge and BASIC ROM
         RTS
 --------------------------------- 
-        LDA #$28 
-        STA $DE98
-        JMP L86AB
+LDE98   LDA #$28 
+        STA LDE98				; module on
+        JMP L86AB				; continue TRACE
 --------------------------------- 
 
         !by $ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff
 
-        LDY #$44 
-        STY $DEA8
-        JMP L802B ; initialize the modul
 --------------------------------- 
-        DEC $01
-L9EB2   LDA ($22),Y
+LDEA8   LDY #$44 
+        STY LDEA8
+        JMP L802B				; initialize the modul
+--------------------------------- 
+; copy ($22) to ($24) X pages upwards with module off
+LDEB0   DEC $01					; no cartridge, no BASIC ROM, RAM below readable
+-       LDA ($22),Y
         STA ($24),Y
         INY
-        BNE L9EB2
+        BNE -
         INC $23
         INC $25
         DEX
-        BNE L9EB2
-        INC $01
+        BNE -
+        INC $01					; activate cartridge and BASIC ROM
         RTS
 --------------------------------- 
-        DEC $01
-L9EC5   LDY #$01 
+; copy ($22) one byte down until $2d/$2e with module off
+LDEC3   DEC $01					; no cartridge, no BASIC ROM, RAM below readable
+-       LDY #$01 
         LDA ($22),Y
         DEY
         STA ($22),Y
         INC $22
-        BNE L9ED2
+        BNE +
         INC $23
-L9ED2   LDA $22
++       LDA $22
         CMP $2D
-        BNE L9EC5
+        BNE -
         LDA $23
         CMP $2E
-        BNE L9EC5
-        INC $01
+        BNE -
+        INC $01					; activate cartridge and BASIC ROM
         RTS
 --------------------------------- 
-        LDA #$EE 
-        STA $DEE1
+LDEE1   LDA #$EE 
+        STA LDEE1				; module off
         LDA #$00 
-        JSR $DE1D
-        PHA
+        JSR LDE1D				; JMP ($55)
+        PHA					; keep return value
         LDA #$F4 
-        STA $DEE1
-        PLA
+        STA LDEE1				; module on
+        PLA					; return A
         RTS
 --------------------------------- 
-        BRK
---------------------------------- 
-        BRK
---------------------------------- 
-        BRK
---------------------------------- 
-        BRK
---------------------------------- 
-        BRK
---------------------------------- 
-        BRK
---------------------------------- 
-        BRK
---------------------------------- 
-        BRK
---------------------------------- 
-        BRK
---------------------------------- 
-        BRK
---------------------------------- 
-        BRK
---------------------------------- 
-        BRK
---------------------------------- 
-        BRK
---------------------------------- 
+}
+
+	!align 255, 0, 0
+
 L9F00   !by $09,$0B,$1B,$2B,$61,$7C,$98,$9D ;...+....
         !by $0C,$21,$4B,$64,$93,$93,$10,$10 ;.!K.....
         !by $11,$13,$13,$14,$15,$15,$12,$1C ;........
@@ -4017,4 +3985,3 @@ L9FA8   !by $00,$24,$00,$2C,$00,$00,$00,$00 ;.$.,....
         !by $00,$B4,$00,$BC,$00,$00,$00,$86 ;........
         !by $00,$8E,$00,$00,$00,$00,$00,$96 ;........
         !by $00,$84,$00,$8C,$00,$94,$00,$00 ;........
-
