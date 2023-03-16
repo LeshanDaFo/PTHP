@@ -646,25 +646,25 @@ L8475   LDA $2D
         LDA $27
         STA $2E
         JMP L85A1
---------------------------------- 
-L848B   BIT $A2
-        BPL L84A7
-        LDA #$CF 
-L8491   LDY #$02 
+; - copy protection/module verification --------
+L848B   BIT $A2                                 ; low jiffy clock byte, bit 7
+        BPL L84A7                               ; only in a 2.13 seconds interval (128 1/60 jiffies)
+        LDA #$CF                                ; high byte calculation base
+L8491   LDY #$02                                ; upper index (to check 3 bytes)
         STY $22
-        ASL
+        ASL                                     ; $9E, C=1
         STA $23
-        ADC #$3F 
-        STA $25
-        STY $24
-L849E   LDA ($24),Y
-        CMP ($22),Y
-        BNE L8491+1                             ;L8492; error ???, should be L8493
-        DEY
+        ADC #$3F                                ; $9E
+        STA $25                                 ; $DE
+        STY $24                                 ; $02
+L849E   LDA ($24),Y                             ; $DE04 ... $DE02
+        CMP ($22),Y                             ; $9E04 ... $9E02
+        BNE L8491+1                             ; illegal opcode $02: KIL (make C64 hang)
+        DEY                                     ; check 3 bytes
         BPL L849E
-L84A7   LDA #$86 
-        LDY #$E3                                ; basic cold start
-        JMP $DE14
+L84A7   LDA #$86                                ; finishing up a command:
+        LDY #$E3                                ; basic warm start
+        JMP $DE14                               ; setup $55/$56 and JMP ($55) with module off
 ; ----------------------------------------------
 ; - $84AE  basic command KILL ------------------
 ; ----------------------------------------------
@@ -3796,7 +3796,7 @@ L9DE4   !by >APPEND,>DELETE,>ENDTRACE,>FIND,>GENLINE,>HELP,>KILL,>LPAGE
         !by $00,$00,$00,$00,$00,$00,$00,$00
         !by $00,$00,$00,$00
 
-; thsi part will be mirrored to $DE00 ------------
+; this part will be mirrored to $DE00 ------------
         DEC $01
         LDA ($5F),Y
         PHA
