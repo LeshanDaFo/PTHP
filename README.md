@@ -8,6 +8,7 @@ Information about this company you can find at: https://www.c64-wiki.de/wiki/Pri
 <br />The latest known Version is a module for the C128/C64, and its called "Help PC-128 Plus C-64".
 <br />
 <br />A special thanks goes to Johann Klasek, who has support me to get the C64/C128 version, and for his first examination on it.
+<br />You can found more information about the C64/C128 Modul version on Johann Klasek's webpage: https://klasek.at/c64/helpplus/ 
 <br />
 <br />So far, there are 4 different version for the C64 known by me. 
 <br />
