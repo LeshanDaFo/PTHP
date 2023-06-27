@@ -7,10 +7,10 @@ Information about this company you can find at: https://www.c64-wiki.de/wiki/Pri
 
 <br />The latest known Version is a module for the C128/C64, and its called "Help PC-128 Plus C-64".
 <br />
-<br />A special thanks goes to Johann Klasek, who has support me to get the C64/C128 version, and for his first examination on it.
+<br />A special thanks goes to Johann Klasek, who has support me to get the C64/C128 version, and for his first examination on it, and a special thanks goes to Diddle, for providing V4
 <br />You can found more information about the C64/C128 Modul version on Johann Klasek's webpage: https://klasek.at/c64/helpplus/ 
 <br />
-<br />So far, there are 4 different version for the C64 known by me. 
+<br />So far, there are 5 different version for the C64 known by me. 
 <br />
 ### V1: 
 This should be the initial version for the C64, the screen message shows "*** HELP C-64 PLUS ***".
@@ -23,16 +23,25 @@ The screen message is the same with version 1, the error in $8182 is corrected, 
 <br />Additional one, in my opinion not necessary, JSR command was changed at address $89E3.
 
 ### V3:
-The screen message is changed to "*PRINT-TECHNIK-HELP-PLUS*", additonal compare to version 2 a change in the dump command is done.
+The screen message is changed to " *PRINT-TECHNIK-HELP-PLUS*", additonal compare to version 2 a change in the dump command is done.
 <br />A space is added to the output.
 <br />Before the output was: "A =12".
 <br />now the output is like: "A = 12".
 <br />There are also other changes in other places, on which i did not do any further investigation.
 
-The verion 1, 2 and 3 can be easy used as a modul, by programming it on an EPROM, and connect it to the C64
-
 ### V4:
+The screen message is changed a liitle bit to "*PRINT-TECHNIK-HELP PLUS* ",
+There are some smal code changes applied in differnt are. This should be some improvements only.
+<br />Change a branch in the DUMP area.
+<br />Add some code to the RENUMBER part, a check for 'qoutes' is added.
+<br />In the 'ASSEMBLER' area, a branch instruction is changed from 'bne' to 'beq' 
+<br />Additional some changes in the 'COMPACTOR' area are applied.
+
+The verion 1 to 4 can be easy used as a modul, by programming it on an EPROM, and connect it to the C64
+
+### V128:
 This is as far as i know the last version.
+<br />In the Manual it's named "Help PC-128, Plus C-64"
 <br />This version has a new hardware design for the modul. It will also mirror a part of the modul to address $DE00.
 <br />At this location the modul has some switching commands, which allows to switch off the modul, and switch between RAM and ROM by changing the GAME and/or EXROM lines. Btw, this is also a nice copy protection.
 <br />The code is rearranged, and optimezed in several places. So far i have not seen some functional changes in the different program parts, except the jumpings to the addresses in $DExx, for switching between RAM and ROM.

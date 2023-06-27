@@ -10,9 +10,6 @@
 ; #  This source is available at:                               #
 ; #  https://github.com/LeshanDaFo/PTHP                         #
 ; #                                                             #
-; #  Special thanks goes to Johann Klasek who has supported me  #
-; #  to make this source possible                               #
-; #                                                             #
 ; #  This version of the source code is under MIT License       #
 ; ###############################################################
 

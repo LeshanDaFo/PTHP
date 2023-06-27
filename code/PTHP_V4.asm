@@ -1,7 +1,7 @@
 ; ###############################################################
 ; #                                                             #
 ; #  Print Technik Help Plus V4 source code                     #
-; #  Version 1.1 (2023.03.16)                                   #
+; #  Version 1.2 (2023.07.26)                                   #
 ; #  Copyright (c) 2023 Claus Schlereth                         #
 ; #                                                             #
 ; #  This source code is based on the basic extension modul     #
@@ -10,8 +10,9 @@
 ; #  This source is available at:                               #
 ; #  https://github.com/LeshanDaFo/PTHP                         #
 ; #                                                             #
-; #  Special thanks goes to Johann Klasek who has supported me  #
-; #  to make this source possible and contributed to it.        #
+; #  Special thanks goes to Diddle, a member of Forum64         #
+; #  https://www.forum64.de/wcf/index.php?user/6015-diddl/      #
+; 3  who has provided the program for this version 4            #
 ; #                                                             #
 ; #  This version of the source code is under MIT License       #
 ; ###############################################################
@@ -23,11 +24,13 @@ IONO            = $0131
 
 INLIN           = $A560                         ; call for BASIC input and return
 CRUNCH          = $A579                         ; crunch keywords into BASIC tokens
+ISCNTC          = $A82C                         ; LISTEN FOR CONT-C
 CLEARC          = $A660
 STXTP           = $A68E
 CRDO            = $AAD7                         ; ;PRINT CRLF TO START WITH
 STROUT          = $AB1E
 FRMNUM          = $AD8A                         ; evaluate expression and check is numeric, else do type mismatch
+SNERR           = $AF08                         ; handle syntax error
 ERRFC           = $B248                         ; illegal quantity error
 GETADR          = $B7F7                         ; convert FAC_1 to integer in temporary integer
 ADD             = $BC49                         ; Addition
@@ -36,6 +39,7 @@ INTOUT1         = $BDD1                         ; Output Positive Integer in A/X
 FLPSTR          = $BDDD                         ; Convert FAC#1 to ASCII String
 EREXIT          = $E0F9                         ; Error exit
 SCATN           = $EDBE                         ; set serial ATN high
+READY           = $E386                         ; go handle error message
 SECND           = $FF93                         ; send SA after LISTEN
 TKSA            = $FF96                         ; Set secondary address
 IECIN           = $FFA5                         ; Read byte from IEC bus
@@ -50,3938 +54,3738 @@ CHKOUT          = $FFC9                         ; Set Output
 CLRCHN          = $FFCC                         ; Restore I/O Vector
 CHRIN           = $FFCF                         ; Input Vector
 CHROUT          = $FFD2                         ; Output Vector
-LOAD            = $FFD5                         ; Load Vector
 SAVE            = $FFD8                         ; Save Vector
 STOPT           = $FFE1                         ; Test STOP Vector
 NMI             = $FE5E                         ; NMI after found Modul
 GETIN           = $FFE4                         ; Vector: Kernal GETIN Routine
 
-!to"build/PTHP-128.prg",cbm
+!to"build/PTHP-V4.crt",plain
+; ----------------------------------------------
+; -------- Modul Part --------------------------
+; ----------------------------------------------   
+
+!zone main
+
         *=$8000                                 ; Modul sytart address
 
         !byte   <reset, >reset                  ; $8000 RESET-Vector 
         !byte   <NMI, >NMI                      ; $8002 NMI-Vector   
-        !pet  $c3, $c2, $cd,"80"                ; $8004 CBM80
+        !byte   $c3, $c2, $cd                   ; ab $8004 CBM80 (bei den Buchstaben muss
+        !text   "80"                            ; das 7. Bit gesetzt sein!)
 
 reset:
-        LDX #$05 
-        STX $D016
-        JSR $FDA3                               ; initialise SID, CIA and IRQ
-        LDA #$50                                ; RAM test and find RAM end
-        LDY #$FD                                ;
-        JSR LDE09                               ; set $55/$56 and JSR ($55) with module off
-        JSR $FD15                               ; set Ram end and restore default I/O vectors
-        JSR $FF5B                               ; initialise VIC and screen editor, set own colors
-        CLI
-        JSR $E453                               ; initialise the BASIC vector table
-        JSR $E3BF                               ; initialise the BASIC RAM locations
-        JSR $E422                               ; print the start up message and initialise the memory pointers
-        LDX #$FB                                ; set x for stack
-        TXS                                     ; set stack
-L802B   JSR L8031                               ; initialize the Modul, and print the message
-        JMP L84A7                               ; basic cold start
---------------------------------- 
-L8031   LDX #$00 
-        STX $0132
-        LDA #$08 
-        STA $0131
-        LDA #<L9D39                             ; message address low byte
-        LDY #>L9D39                             ; message address high byte
-        JSR STROUT                              ; print message
+        ldx     #$05
+        stx     $d016
+        jsr     $fda3                           ; initialise SID, CIA and IRQ
+        jsr     $fd50                           ; RAM test and find RAM end
+        jsr     $fd15                           ; set Ram end and restore default I/O vectors
+        jsr     $FF5B                           ; initialise VIC and screen editor, set own colors
+        cli
+        jsr     $e453                           ; initialise the BASIC vector table
+        jsr     $e3bf                           ; initialise the BASIC RAM locations
+        jsr     $e422                           ; print the start up message and initialise the memory pointers
+        ldx     #$fb                            ; set x for stack
+        txs                                     ; set stack
+        jsr     MPREP                           ; initialize the Modul, and print the message
+        jmp     READY                           ; go handle error message                
+-----------------------------------
+L802d:  jmp     L85e3
+-----------------------------------
+MPREP = $80e8
+FILL1:  !fi     MPREP-FILL1, $aa                ; fill bytes
+
+MPREP:
+; ----------------------------------------------
+; -------- Modul Start -------------------------
+; ---------------------------------------------- 
+        ldx     #$00
+        stx     $0132
+        lda     #$08
+        sta     IONO
+-       lda     SCNMSG,x                        ; load screen message char        
+        beq     +                               ; branch if end
+        jsr     CHROUT                          ; output char on screen
+        inx                                     ; increase counter
+        bne     -                               ; go for next char
 ; patch basic warm start
-        LDA #<LDE20                             ; new BASIC warm start low byte
-        LDX #>LDE20                             ; new BASIC warm start high byte
-        BNE L804C                               ; 'jmp' set vector
++       lda     #<START                         ; new BASIC warm start low byte
+        ldx     #>START                         ; new BASIC warm start high byte
+        bne     +                               ; 'jmp' set vector
 ; restore basic warm start values
-L8048   LDA #$83                                ; old BASIC warm start low byte
-        LDX #$A4                                ; old BASIC warm start low high
-L804C   STA $0302                               ; set vector low byte
-        STX $0303                               ; set vector high byte
-        RTS
---------------------------------- 
-L8053   JSR INLIN
-        STX $7A
-        STY $7B
-        JSR CHRGET
-        TAX
-        BEQ L8053
-        BCC L808B
-        LDX #$00 
-        STX $0132
-        LDX #$0F 
-L8069   CMP L9D94,X                             ; DOS and monitor commands char
-        BEQ L8076
-        DEX
-        BPL L8069
-L8071   STX $3A
-        JMP LDE28                               ; go crunch and interpret
---------------------------------- 
-L8076   LDA DMLBYT,x                            ; DOS and monitor commands low byte
-        STA $55
-        LDA DMHBYT,x                            ; DOS and monitor commands high byte
-        STA $56
-        JMP ($0055)                             ; execute command
-; - $8083  basic command GENLINE --------------- 
+L8103:  lda     #$83                            ; old BASIC warm start low byte
+        ldx     #$a4                            ; old BASIC warm start low high
++       sta     $0302                           ; set vector low byte
+        stx     $0303                           ; set vector high byte
+        rts
+-----------------------------------
+START:  jsr     INLIN
+        stx     $7a
+        sty     $7b
+        jsr     CHRGET
+        tax
+        beq     START
+        bcc     L8149
+        ldx     #$00
+        stx     $0132
+        ldx     #$11
+-       cmp     DMCHAR,x                        ; DOS and monitor command char
+        beq     +
+        dex
+        bpl     -
+L812c:  stx     $3a
+        jsr     CRUNCH                          ; do crunch BASIC tokens
+        jmp     $a7e1                           ; go scan and interpret code
+-----------------------------------
++       lda     DMLBYT,x                        ; DOS and monitor low byte
+        sta     $55
+        lda     DMHBYT,x                        ; DOS and monitor high byte
+        sta     $56
+        jmp     ($0055)                         ; execute command
+; ----------------------------------------------
+; - $8141  basic command GENLINE ---------------
+; ----------------------------------------------
 GENLINE:
-        JSR L83E2
-        LDA #$80 
-        STA $0132
-L808B   BIT $0132
-        BPL L80BD
-        LDA $0133
-        LDY $0134
-        JSR L80DD
-        LDY #$00 
-L809B   LDA $0100,Y
-        BEQ L80A6
-        STA $0277,Y
-        INY
-        BNE L809B
-L80A6   LDA #$20 
-        STA $0277,Y
-        INY
-        STY $C6
-        LDA $0133
-        LDY $0134
-        JSR L80CF
-        STA $0133
-        STY $0134
-L80BD   LDX #$FF 
-        STX $3A
-        JSR CHRGOT
-        BCS L8053
-        LDY #$9C 
-        STY $55
-        LDY #$A4 				; handle new BASIC line
-        JMP LDE16				; JMP $A49C with module off
---------------------------------- 
-L80CF   CLC
-        ADC $0135
-        BCC L80DC
-        INY
-        CPY #$FA 
-        BCC L80DC
-        LDY #$00 
-L80DC   RTS
---------------------------------- 
-L80DD   STA $63
-        STY $62
-L80E1   LDX #$90 
-        SEC
-        JSR ADD
-        JMP FLPSTR
-; - #80EA  basic commands call ----------------- 
-BASCMD:  LDY     #$01 
-        LDA ($7A),Y
-        LDX #$0F 
-L80F0   CMP L9DC4,X                             ; basic command char tabl
-        BEQ L80FB
-        DEX
-        BPL L80F0
-        JMP L8071
---------------------------------- 
-L80FB   LDA L9DD4,X                             ; basic command low byte table
-        STA $55
-        LDA L9DE4,X                             ; basic command high byte table
-        STA $56
-        INC $7A
-        JMP ($0055)                             ; execute command
+        jsr     L846d
+        lda     #$80
+        sta     $0132
+L8149:  bit     $0132
+        bpl     L817b
+        lda     $0133
+        ldy     $0134
+        jsr     L8195
+        ldy     #$00
+L8159:  lda     $0100,y
+        beq     L8164
+        sta     $0277,y
+        iny
+        bne     L8159
+L8164:  lda     #$20
+        sta     $0277,y
+        iny
+        sty     $c6
+        lda     $0133
+        ldy     $0134
+        jsr     L8187
+        sta     $0133
+        sty     $0134
+L817b:  ldx     #$ff
+        stx     $3a
+        jsr     CHRGOT
+        bcs     START
+        jmp     $a49c
+-----------------------------------
+L8187:  clc
+        adc     $0135
+        bcc     L8194
+        iny
+        cpy     #$fa
+        bcc     L8194
+        ldy     #$00
+L8194:  rts
+-----------------------------------
+L8195:  sta     $63
+        sty     $62
+L8199:  ldx     #$90
+        sec
+        jsr     ADD
+        jmp     FLPSTR
 ; ----------------------------------------------
-; - #810A  Matrix and Variable dump ------------
-; ------- start $81B1 and $8274 ----------------
+; - #81A2  basic commands call -----------------
 ; ----------------------------------------------
-L810A   JSR STOPT				; stop pressed?
-        BEQ L8116
-        LDA $028E
-        CMP #$01 				; shift pressed?
-        BEQ L810A				; wait until shift released
-L8116   RTS
+BASCMD: ldy     #$01
+        lda     ($7a),y
+        ldx     #$0f
+L81a8:  cmp     BCCHAR,x                        ; basic command char table
+        beq     L81b3
+        dex
+        bpl     L81a8
+        jmp     L812c
+-----------------------------------
+L81b3:  lda     BCLBYT,x                        ; basic command low byte table
+        sta     $55
+        lda     BCHBYT,x                        ; basic command high byte table
+        sta     $56
+        inc     $7a
+        jmp     ($0055)
+; ----------------------------------------------
+; - #81C2  Matrix and Variable dump ------------
+; ------- start $8249 and $8307 ----------------
+; ----------------------------------------------
+L81c2:  jsr     CRDO
+L81c5:  jsr     ISCNTC
+        lda     $028e
+        cmp     #$01
+        beq     L81c5
+        ldy     #$00
+        lda     ($45),y
+        tax
+        bpl     L81dc
+        iny
+        lda     ($45),y 
+        bmi     L81c5                           ; was in V3 'bmi L81dc'
+        rts     
 ---------------------------------
-L8117   JSR L810A				; check for break and wait
-        BNE L8116				; end wait
-        LDA #$49 				; breaking with stop key
-        LDY #$A8 				; $A849 print 'break' and warmstart
-        JMP LDE14				; setup $55/$56 and JMP ($55) with module off
+L81dc:  ldy     #$00
+        lda     ($45),y
+        and     #$7f
+        jsr     CHROUT
+        iny
+        lda     ($45),y
+        tay
+        and     #$7f
+        beq     L81f0
+        jsr     CHROUT
+L81f0:  txa
+        bpl     L81f7
+        lda     #$25
+        bne     L81fc
+L81f7:  tya
+        bpl     L81ff
+        lda     #$24
+L81fc:  jsr     CHROUT
+L81ff:  rts
 ---------------------------------
-L8123   JSR CRDO
-        JSR L8117				; break or wait
-        LDY #$00 
-        JSR LDE32				; LDA ($45),Y with module off
-        TAX
-        BPL L8138
-        INY
-        JSR LDE32				; LDA ($45),Y with module off
-        BMI L8138
-        RTS
---------------------------------- 
-L8138   LDY #$00 
-        JSR LDE32				; LDA ($45),Y with module off
-        AND #$7F 
-        JSR CHROUT
-        INY
-        JSR LDE32				; LDA ($45),Y with module off
-        TAY
-        AND #$7F 
-        BEQ L814E
-        JSR CHROUT
-L814E   TXA
-        BPL L8155
-        LDA #$25 
-        BNE L815A
-L8155   TYA
-        BPL L815D
-        LDA #$24 
-L815A   JSR CHROUT
-L815D   RTS
---------------------------------- 
-L815E   JSR CHROUT
-L8161   JSR L8857
-        LDA #$3D 
-        JMP CHROUT
---------------------------------- 
-L8169   LDY #$00 
-        JSR LDE44				; LDA ($22),Y with module off
-        TAX
-        INY
-        JSR LDE44				; LDA ($22),Y with module off
-        TAY
-        TXA
-        JSR $B395
-        LDY #$01 
-        JMP $BDD7
---------------------------------- 
-L817D   LDA #$A6 
-        LDY #$BB 
-        JSR LDE09                               ; set $55/$56 and JSR ($55) with module off
-        LDY #$01 
-        JMP $BDD7
---------------------------------- 
-L8189   JSR L81AC
-        LDY #$02 
-        JSR LDE44				; LDA ($22),Y with module off
-        STA $60
-        DEY
-        JSR LDE44				; LDA ($22),Y with module off
-        STA $5F
-        DEY
-        JSR LDE44				; LDA ($22),Y with module off
-        STA $26
-        BEQ L81AC
-L81A1   JSR LDE00				; LDA ($5F),Y with module off
-        JSR CHROUT
-        INY
-        CPY $26
-        BNE L81A1
-L81AC   LDA #$22 
-        JMP CHROUT
-; - $81B1  basic command MATRIX DUMP -----------
-M_DUMP: LDX $30
-        LDA $2F
-L81B5   STA $45
-        STX $46
-        CPX $32
-        BNE L81BF
-        CMP $31
-L81BF   BCC L81C4
-        JMP L848B				; check cartridge and warm start
---------------------------------- 
-L81C4   LDY #$04 
-        ADC #$05 
-        BCC L81CB
-        INX
-L81CB   STA $0B
-        STX $0C
-        JSR LDE32				; LDA ($45),Y with module off
-        ASL
-        TAY
-        ADC $0B
-        BCC L81D9
-        INX
-L81D9   STA $FB
-        STX $FC
-        DEY
-        STY $FE
-        LDA #$00 
-L81E2   STA $0205,Y
-        DEY
-        BPL L81E2
-        BMI L821E
-L81EA   LDY $FE
-L81EC   DEY
-        STY $FD
-        TYA
-        TAX
-        INC $0206,X
-        BNE L81F9
-        INC $0205,X
-L81F9   LDA $0205,Y
-        JSR LDE4D				; LDA ($0B),Y with module off
-        BNE L8208
-        INY
-        LDA $0205,Y
-        JSR LDE4D				; LDA ($0B),Y with module off
-L8208   BCC L821E
-        LDA #$00 
-        LDY $FD
-        STA $0205,Y
-        STA $0206,Y
-        DEY
-        BPL L81EC
-        LDA $FB
-        LDX $FC
-        JMP L81B5
---------------------------------- 
-L821E   JSR L8123
-        LDY $FE
-        LDA #$28 
-L8225   JSR CHROUT
-        LDA $0204,Y
-        LDX $0205,Y
-        STY $FD
-        JSR INTOUT
-        LDA #$2C 
-        LDY $FD
-        DEY
-        DEY
-        BPL L8225
-        LDA #$29 
-        JSR L815E
-        LDA $FB
-        LDX $FC
-        STA $22
-        STX $23
-        LDY #$00 
-        JSR LDE32				; LDA ($45),Y with module off
-        BPL L8256
-        JSR L8169
-        LDA #$02 
-        BNE L8268
-L8256   INY
-        JSR LDE32				; LDA ($45),Y with module off
-        BMI L8263
-        JSR L817D
-        LDA #$05 
-        BNE L8268
-L8263   JSR L8189
-        LDA #$03 
-L8268   CLC
-        ADC $FB
-        STA $FB
-        BCC L8271
-        INC $FC
-L8271   JMP L81EA
-; - $8274  basic command VAR DUMP -------------- 
-V_DUMP: LDA $2D
-        LDY $2E
-L8278   STA $45
-        STY $46
-        CPY $30
-        BNE L8282
-        CMP $2F
-L8282   BCC L8287
-        JMP L848B				; check cartridge and warm start
---------------------------------- 
-L8287   ADC #$02 
-        BCC L828C
-        INY
-L828C   STA $22
-        STY $23
-        JSR L8123
-        TXA
-        BPL L82A2
-        TYA
-        BPL L82B1
-        JSR L8161
-        JSR L8169
-        JMP L82B1
---------------------------------- 
-L82A2   JSR L8161
-        TYA
-        BMI L82AE
-        JSR L817D
-        JMP L82B1
---------------------------------- 
-L82AE   JSR L8189
-L82B1   LDA $45
-        LDY $46
-        CLC
-        ADC #$07 
-        BCC L8278
-        INY
-        BCS L8278
+L8200:  jsr     CHROUT
+L8203:  JSR     L88CC                           ; was in V3 'jsr L88be'
+        lda     #$3d
+        jmp     CHROUT
+---------------------------------
+L820b:  ldy     #$00
+        lda     ($22),y
+        tax
+        iny
+        lda     ($22),y
+        tay
+        txa
+        jsr     $b395
+        ldy     #$01        
+        jmp     $bdd7               
+---------------------------------
+L821d:  jsr     $bba6
+        ldy     #$01
+        jmp     $bdd7                  
+---------------------------------
+L8225:  jsr     L8244
+        ldy     #$02
+        lda     ($22),y
+        sta     $25
+        dey
+        lda     ($22),y
+        sta     $24
+        dey
+        lda     ($22),y
+        sta     $26
+        beq     L8244
+L823a:  lda     ($24),y
+        jsr     CHROUT
+        iny
+        cpy     $26
+        bne     L823a
+L8244:  lda     #$22
+        jmp     CHROUT
+; - $8249  basic command MATRIX DUMP -----------
+M_DUMP: ldx     $30
+        lda     $2f
+L824d:  sta     $45
+        stx     $46
+        cpx     $32
+        bne     L8257
+        cmp     $31
+L8257:  bcc     L825c
+        jmp     READY                           ; go handle error message
+---------------------------------
+L825c:  ldy     #$04
+        adc     #$05
+        bcc     L8263
+        inx
+L8263:  sta     $0b
+        stx     $0c
+        lda     ($45),y
+        asl
+        tay
+        adc     $0b
+        bcc     L8270
+        inx
+L8270:  sta     $fb
+        stx     $fc
+        dey
+        sty     $55
+        lda     #$00
+L8279:  sta     $0205,y
+        dey
+        bpl     L8279
+        bmi     L82b3
+L8281:  ldy     $55
+L8283:  dey
+        sty     $fd
+        tya
+        tax
+        inc     $0206,x
+        bne     L8290
+        inc     $0205,x
+L8290:  lda     $0205,y
+        cmp     ($0b),y
+        bne     L829d
+        iny
+        lda     $0205,y
+        cmp     ($0b),y
+L829d:  bcc     L82b3
+        lda     #$00
+        ldy     $fd
+        sta     $0205,y
+        sta     $0206,y
+        dey
+        bpl     L8283
+        lda     $fb
+        ldx     $fc
+        jmp     L824d
+---------------------------------
+L82b3:  jsr     L81c2
+        ldy     $55
+        lda     #$28
+L82ba:  jsr     CHROUT
+        lda     $0204,y
+        ldx     $0205,y
+        sty     $fd
+        jsr     INTOUT
+        lda     #$2c
+        ldy     $fd
+        dey
+        dey
+        bpl     L82ba
+        lda     #$29
+        jsr     L8200
+        lda     $fb
+        ldx     $fc
+        sta     $22
+        stx     $23
+        ldy     #$00
+        lda     ($45),y
+        bpl     L82ea
+        jsr     L820b
+        lda     #$02
+        bne     L82fb
+L82ea:  iny
+        lda     ($45),y
+        bmi     L82f6
+        jsr     L821d
+        lda     #$05
+        bne     L82fb
+L82f6:  jsr     L8225
+        lda     #$03
+L82fb:  clc
+        adc     $fb
+        sta     $fb
+        bcc     L8304
+        inc     $fc
+L8304:  jmp     L8281                 
+; - $8307  basic command VAR DUMP --------------
+V_DUMP: lda     $2d
+        ldy     $2e
+L830b:  sta     $45
+        sty     $46
+        cpy     $30
+        bne     L8315
+        cmp     $2f
+L8315:  bcc     L831a
+        jmp     READY                           ; go handle error message
+---------------------------------
+L831a:  adc     #$02
+        bcc     L831f
+        iny
+L831f:  sta     $22
+        sty     $23
+        jsr     L81c2        
+        txa
+        bpl     L8335
+        tya
+        bpl     L8344
+        jsr     L8203
+        jsr     L820b
+        jmp     L8344
+---------------------------------
+L8335:  jsr     L8203
+        tya
+        bmi     L8341
+        jsr     L821d
+        jmp     L8344
+---------------------------------
+L8341:  jsr     L8225
+L8344:  lda     $45
+        ldy     $46
+        clc
+        adc     #$07
+        bcc     L830b
+        iny
+        bcs     L830b
 ; ----------------------------------------------
 ; ------- Matrix and Variable dump end ---------
 ; ----------------------------------------------
 
 ; ----------------------------------------------
-; - $82BD  basic command FIND ------------------
+; - $8350  basic command FIND ------------------
 ; ----------------------------------------------
-FIND:   INC $7A
-        JSR CRUNCH
-        JSR LDE60				; next CHRGET with module off
-        LDY #$00 
-        CMP #$22 				; '"' string beginning?
-        BNE L82CE
-        DEY					; = $FF
-        INC $7A
-L82CE   STY $FE					; search in strings ($FF) or code ($00)
-        LDA $2B					; BASIC start
-        LDX $2C
-L82D4   STX $23
-        STA $22
-        STA $5F
-        STX $60
-        JSR L8117				; break or wait
-        LDA $028E				; last control key (not used)
-        LDY #$00 
-        STY $0F					; clear in-string flag
-        INY					; = 0
-        JSR LDE00				; LDA ($5F),Y with module off
-        BNE L82EF				; end of program?
-        JMP L848B				; check cartridge and warm start
---------------------------------- 
-L82EF   LDA #$04 				; advance 4 bytes
-        !by $2C					; BIT $HHLL: skip following instruction
-L82F2   LDA #$01				; advance 1 byte
-        CLC
-        ADC $22
-        STA $22
-        BCC L82FD
-        INC $23
-L82FD   LDY #$00 
-        JSR LDE44				; LDA ($22),Y with module off
-        BEQ L8325
-        CMP #$22 				; '"'
-        BNE L830E
-        LDA $0F
-        EOR #$FF 
-        STA $0F					; toggle in-string flag
-L830E   LDA $0F
-        CMP $FE					; in same area? (code/string)
-        BNE L82F2				; skip if the other one
-L8314   JSR LDE3B				; LDA ($7A),Y with module off
-        BEQ L832B				; search string (empty?)
-        STA $0B
-        JSR LDE44				; LDA ($22),Y with module off
-        CMP $0B					; match char?
-        BNE L82F2				; advance in line
-        INY					; next character
-        BNE L8314				; branch always
-L8325   LDA $22
-        LDX $23
-        BNE L8332
-L832B   JSR L835B				; found, search string matched
-        LDA $5F
-        LDX $60
-L8332  CLC
-        ADC #$01 
-        BCC L82D4				; next line
-        INX
-        BCS L82D4				; next line
-; - $833A  basic command HELP ----------------
-HELP:   LDA $3A
-        STA $15
-        LDA $39
-        STA $14
-        JSR L90C8
-        BCC L8358
-        LDA $3D
-        ADC #$00 
-        CMP $5F
-        BNE L8351
-        ADC #$03 
-L8351   STA $0A
-        LDA #$40 
-        JSR L835D
-L8358   JMP L848B				; check cartridge and warm start
---------------------------------- 
-L835B   LDA #$00 
-L835D   STA $0B
-        JSR CRDO
-        LDY #$02 
-        STY $0F
-        JSR LDE00				; LDA ($5F),Y with module off
-        TAX
-        INY
-        JSR LDE00				; LDA ($5F),Y with module off
-        JSR INTOUT
-        JSR L8857
-        LDA #$04 
-        !by $2C					; BIT $HHLL: skip following instruction
-L8377   LDA #$01
-        CLC
-        ADC $5F
-        STA $5F
-        BCC L8382
-        INC $60
-L8382   BIT $0B
-        BVC L838E
-        CMP $0A
-        BNE L838E
-        LDA #$01 
-        STA $C7
-L838E   LDY #$00 
-        JSR LDE00				; LDA ($5F),Y with module off
-        BNE L8396
-        RTS
---------------------------------- 
-L8396   CMP #$3A 
-        BNE L839C
-        STY $C7
-L839C   CMP #$22 
-        BNE L83A8
-        LDA $0F
-        EOR #$FF 
-        STA $0F
-        LDA #$22 
-L83A8   TAX
-        BMI L83B3
-L83AB   AND #$7F 
-L83AD   JSR CHROUT
-        JMP L8377
---------------------------------- 
-L83B3   CMP #$FF 
-        BEQ L83AD
-        BIT $0F
-        BMI L83AD
-        LDY #$A0 
-        STY $23
-        LDY #$9E 
-        STY $22
-        LDY #$00 
-        ASL
-        BEQ L83D8
-L83C8   DEX
-        BPL L83D7
-L83CB   INC $22
-        BNE L83D1
-        INC $23
-L83D1   LDA ($22),Y
-        BPL L83CB
-        BMI L83C8
-L83D7   INY
-L83D8   LDA ($22),Y
-        BMI L83AB
-        JSR CHROUT
-        INY
-        BNE L83D8
-L83E2   JSR LDE60				; next CHRGET with module off
-        BNE L83EF
-        LDX #$0A 
-        LDY #$00 
-        LDA #$64 
-        BNE L8409
-L83EF   LDA #$EB 
-        LDY #$B7 				; $b7eb get parameter poke/wait
-        JSR LDE09                               ; set $55/$56 and JSR ($55) with module off
-        LDA $14
-        LDY $15
-        CPY #$FA 
-        BCC L8405
-L83FE   LDA #$08                                ; syntax error 
-        LDY #$AF 
-        JMP LDE14				; setup $55/$56 and JMP ($55) with module off
---------------------------------- 
-L8405   CPX #$00 
-        BEQ L83FE
-L8409   STX $0135
-        STA $0133
-        STY $0134
-        RTS
+FIND:   inc     $7a
+        lda     $3d
+        pha
+        jsr     CRUNCH
+        jsr     CHRGET
+        ldy     #$00
+        cmp     #$22
+        bne     L8364
+        dey
+        inc     $7a
+L8364:  sty     $fe
+        lda     $2b
+        ldx     $2c
+L836a:  sta     $3d
+        stx     $23
+        sta     $22
+        sta     $5f
+        stx     $60
+L8374:  jsr     ISCNTC
+        lda     $028e
+        cmp     #$01
+        beq     L8374
+        ldy     #$00
+        sty     $0f
+        iny
+        lda     ($5f),y
+        bne     L838d
+        pla
+        sta     $3d
+        jmp     READY                           ; go handle error message
+---------------------------------
+L838d:  lda     #$04
+        !by     $2c
+L8390:  lda     #$01
+        clc
+        adc     $22
+        sta     $22
+        bcc     L839b
+        inc     $23
+L839b:  ldy     #$00
+        lda     ($22),y
+        beq     L83bc
+        cmp     #$22
+        bne     L83ab
+        lda     $0f
+        eor     #$ff
+        sta     $0f
+L83ab:  lda     $0f
+        cmp     $fe
+        bne     L8390
+L83b1:  lda     ($7a),y
+        beq     L83c2
+        cmp     ($22),y
+        bne     L8390
+        iny
+        bne     L83b1
+L83bc:  lda     $22
+        ldx     $23
+        bne     L83cb
+L83c2:  inc     $3d
+        jsr     L83e6
+        lda     $5f
+        ldx     $60
+L83cb:  clc
+        adc     #$01
+        bcc     L836a
+        inx
+        bcs     L836a
 ; ----------------------------------------------
-; - $8413  basic command DELETE ----------------
+; - $83D3  basic command HELP ------------------
 ; ----------------------------------------------
-DELETE: JSR LDE60				; next CHRGET with module off
-        BEQ L83FE
-        BCC L841E
-        CMP #$2D 
-        BNE L83FE
-L841E   JSR $A96B
-        LDA #$13 
-        LDY #$A6 				; $a613 search BASIC for temporary integer line number
-        JSR LDE09                               ; set $55/$56 and JSR ($55) with module off
-        JSR LDE66				; CHRGOT with module off
-        BEQ L8439
-        CMP #$2D 
-        BNE L83EF
-        JSR LDE60				; next CHRGET with module off
-        JSR $A96B
-        BNE L83FE
-L8439   LDA $14
-        ora $15
-        BNE L8443
-        LDA #$FF 
-        STA $15
-L8443   LDX $5F
-        LDA $60
-        STX $FB
-        STA $FC
-L844B   STX $22
-        STA $23
-        LDY #$01 
-        JSR LDE44				; LDA ($22),Y with module off
-        BEQ L8475
-        INY
-        JSR LDE44				; LDA ($22),Y with module off
-        TAX
-        INY
-        JSR LDE44				; LDA ($22),Y with module off
-        CMP $15
-        BNE L8467
-        CPX $14
-        BEQ L8469
-L8467   BCS L8475
-L8469   LDY #$00 
-        JSR LDE44				; LDA ($22),Y with module off
-        TAX
-        INY
-        JSR LDE44				; LDA ($22),Y with module off
-        BNE L844B
-L8475   LDA $2D
-        STA $24
-        LDA $2E
-        STA $25
-        JSR L8BB8
-        LDA $26
-        STA $2D
-        LDA $27
-        STA $2E
-        JMP L85A1
-; - copy protection/module verification --------
-L848B   BIT $A2                                 ; low jiffy clock byte, bit 7
-        BPL L84A7                               ; only in a 2.13 seconds interval (128 1/60 jiffies)
-        LDA #$CF                                ; high byte calculation base
-L8491   LDY #$02                                ; upper index (to check 3 bytes)
-        STY $22
-        ASL                                     ; $9E, C=1
-        STA $23
-        ADC #$3F                                ; $9E
-        STA $25                                 ; $DE
-        STY $24                                 ; $02
-L849E   LDA ($24),Y                             ; $DE04 ... $DE02
-        CMP ($22),Y                             ; $9E04 ... $9E02
-        BNE L8491+1                             ; illegal opcode $02: KIL (make C64 hang)
-        DEY                                     ; check 3 bytes
-        BPL L849E
-L84A7   LDA #$86                                ; finishing up a command:
-        LDY #$E3                                ; basic warm start
-        JMP LDE14                               ; setup $55/$56 and JMP ($55) with module off
+HELP:   lda     $3a
+        sta     $15
+        lda     $39
+        sta     $14
+        jsr     $a613
+        bcc     L83e3
+        jsr     L83e6
+L83e3:  jmp     READY                           ; go handle error message
+---------------------------------
+L83e6:  jsr     CRDO
+        ldy     #$02
+        sty     $0f
+        lda     ($5f),y
+        tax
+        iny
+        lda     ($5f),y
+        jsr     INTOUT                    
+        JSR     L88CC                           ; was in V3 'L88be'
+        ldx     $5f
+        dex
+        cpx     $3d
+        bne     L8402
+        sty     $c7
+L8402:  lda     #$04
+        !by     $2c
+L8405:  lda     #$01
+        clc
+        adc     $5f
+        ldx     $5f
+        sta     $5f
+        bcc     L8412
+        inc     $60
+L8412:  cpx     $3d
+        bne     L841A
+        lda     #$01
+        sta     $c7
+L841A:  ldy     #$00
+        lda     ($5f),y
+        bne     L8421
+        rts
+-----------------------------------
+L8421:  cmp     #$3a
+        bne     L8427
+        sty     $c7
+L8427:  cmp     #$22
+        bne     L8433
+        lda     $0f
+        eor     #$ff
+        sta     $0f
+        lda     #$22
+L8433:  tax
+        bmi     L843e
+L8436:  and     #$7f
+L8438:  jsr     CHROUT
+        jmp     L8405
+---------------------------------
+L843e:  cmp     #$ff
+        beq     L8438
+        bit     $0f
+        bmi     L8438
+        ldy     #$a0
+        sty     $23
+        ldy     #$9e
+        sty     $22
+        ldy     #$00
+        asl
+        beq     L8463
+L8453:  dex
+        bpl     L8462
+L8456:  inc     $22
+        bne     L845c
+        inc     $23
+L845c:  lda     ($22),y
+        bpl     L8456
+        bmi     L8453
+L8462:  iny
+L8463:  lda     ($22),y
+        bmi     L8436
+        jsr     CHROUT
+        iny
+        bne     L8463
+L846d:  jsr     CHRGET
+        bne     L847a
+        ldx     #$0a
+        ldy     #$00
+        lda     #$64
+        bne     L848c
+L847a:  jsr     $b7eb
+        lda     $14
+        ldy     $15
+        cpy     #$fa
+        bcc     L8488
+L8485:  jmp     SNERR                           ; syntax error
+---------------------------------
+L8488:  cpx     #$00
+        beq     L8485
+L848c:  stx     $0135
+        sta     $0133
+        sty     $0134
+        rts
 ; ----------------------------------------------
-; - $84AE  basic command KILL ------------------
+; - $8496  basic command DELETE ----------------
 ; ----------------------------------------------
-KILL:   JSR     L8048
+DELETE: jsr     CHRGET
+        beq     L8485
+        bcc     L84a1
+        cmp     #$2d
+        bne     L8485
+L84a1:  jsr     $a96b
+        jsr     $a613
+        jsr     CHRGOT
+        beq     L84b8
+        cmp     #$2d
+        bne     L847a
+        jsr     CHRGET
+        jsr     $a96b
+        bne     L8485
+L84b8:  lda     $14
+        ora     $15
+        bne     L84c2
+        lda     #$ff
+        sta     $15
+L84c2:  ldx     $5f
+        lda     $60
+        stx     $fb
+        sta     $fc
+L84ca:  stx     $22
+        sta     $23
+        ldy     #$01
+        lda     ($22),y
+        beq     L84ef
+        iny
+        lda     ($22),y
+        tax
+        iny
+        lda     ($22),y
+        cmp     $15
+        bne     L84e3
+        cpx     $14
+        beq     L84e5
+L84e3:  bcs     L84ef
+L84e5:  ldy     #$00
+        lda     ($22),y
+        tax
+        iny
+        lda     ($22),y
+        bne     L84ca
+L84ef:  lda     $2d
+        sta     $24
+        lda     $2e
+        sta     $25
+        jsr     L8C2D                           ; was in V3 'jsr L8c1f'
+        lda     $26
+        sta     $2d
+        lda     $27
+        sta     $2e
+        jmp     $a52a
+; ----------------------------------------------
+; - $8505  basic command KILL ------------------
+; ----------------------------------------------
+KILL:   jsr     L8103
 ; ----------------------------------------------
 ; - $8508  basic command END TRACE -------------
 ; ----------------------------------------------
 ENDTRACE:
-        LDA #$E4 
-        LDX #$A7 				; $a7e4 standard BASIC interpreter loop entry
-L84B5   STA $0308
-        STX $0309
-        JMP L848B				; check cartridge and warm start
+        lda     #$e4
+        ldx     #$a7
+L850c:  sta     $0308
+        stx     $0309
+        jmp     READY                           ; go handle error message
 ; ----------------------------------------------
-; - $84BE  basic command LIST PAGE -------------
+; - $8515  basic command LIST PAGE -------------
 ; ----------------------------------------------
-LPAGE:  JSR LDE60				; next CHRGET with module off
-        JSR $A96B
-        JSR L90C8
-        JSR $ABB7
-L84CA   LDA $5F
-        STA $FD
-        LDA $60
-        STA $FE
-        LDA #$93 
-        JSR CHROUT
-L84D7   LDX $5F
-        LDY #$01 
-        JSR LDE00				; LDA ($5F),Y with module off
-        BEQ L84EF
-        JSR L835B
-        INC $5F
-        BNE L84E9
-        INC $60
-L84E9   LDA $D6
-        CMP #$16 
-        BCC L84D7
-L84EF   LDA #$17 
-        STA $D6
-        JSR CRDO
-L84F6   JSR GETIN
-        CMP #$03 
-        BNE L8500
-        JMP LDE20				; direct mode input basic line and execute
---------------------------------- 
-L8500   CMP #$0D 
-        BNE L850D
-        LDY #$01 
-        JSR LDE00				; LDA ($5F),Y with module off
-        BEQ L84F6
-        BNE L84CA
-L850D   CMP #$5E 
-        BNE L84F6
-        JSR L8577
-        BCS L84EF
-        LDA #$93 
-        JSR CHROUT
-        LDA $FE
-        PHA
-        LDA $FD
-        PHA
-        LDX #$16 
-L8523   STX $D6
-        STX $FC
-        LDA $FD
-        STA $22
-        LDA $FE
-        STA $23
-L852F   LDY #$00 
-L8531   LDA $22
-        BNE L8537
-        DEC $23
-L8537   DEC $22
-        JSR LDE44				; LDA ($22),Y with module off
-        BNE L8531
-        INY
-        JSR LDE44				; LDA ($22),Y with module off
-        CMP $FD
-        BNE L852F
-        INY
-        JSR LDE44				; LDA ($22),Y with module off
-        CMP $FE
-        BNE L852F
-        LDX $22
-        LDY $23
-        INX
-        BNE L8556
-        INY
-L8556   STX $FD
-        STX $5F
-        STY $FE
-        STY $60
-        JSR L835B
-        JSR L8577
-        BCC L856F
-L8566   PLA
-        STA $5F
-        PLA
-        STA $60
-        JMP L84EF
---------------------------------- 
-L856F   LDX $FC
-        DEX
-        DEX
-        BPL L8523
-        BMI L8566
-L8577   LDA $2C
-        CMP $FE
-        BNE L8581
-        LDA $2B
-        CMP $FD
-L8581   RTS
+LPAGE:  jsr     CHRGET
+        jsr     $a96b
+        jsr     $a613
+        jsr     $abb7
+        lda     $3d
+        pha
+L8524:  lda     $5f
+        sta     $fd
+        lda     $60
+        sta     $fe
+        lda     #$93
+        jsr     CHROUT
+L8531:  ldx     $5f
+        inx
+        stx     $3d
+        ldy     #$01
+        lda     ($5f),y
+        beq     L854b
+        jsr     L83e6
+        inc     $5f
+        bne     L8545
+        inc     $60
+L8545:  lda     $d6
+        cmp     #$16
+        bcc     L8531
+L854b:  lda     #$17
+        sta     $d6
+        jsr     CRDO
+L8552:  jsr     GETIN
+        cmp     #$03
+        bne     L855f
+        pla
+        sta     $3d
+        jmp     START
+---------------------------------
+L855f:  cmp     #$0d
+        bne     L856b
+        ldy     #$01
+        lda     ($5f),y
+        beq     L8552
+        bne     L8524
+L856b:  cmp     #$5e
+        bne     L8552
+        jsr     L85d5
+        bcs     L854b
+        lda     #$93
+        jsr     CHROUT
+        lda     $fe
+        pha
+        lda     $fd
+        pha
+        ldx     #$16
+L8581:  stx     $d6
+        stx     $fc
+        lda     $fd
+        sta     $24
+        lda     $fe
+        sta     $25
+L858d:  ldy     #$00
+L858f:  lda     $24
+        bne     L8595
+        dec     $25
+L8595:  dec     $24
+        lda     ($24),y
+        bne     L858f
+        iny
+        lda     ($24),y
+        cmp     $fd
+        bne     L858d
+        iny
+        lda     ($24),y
+        cmp     $fe
+        bne     L858d
+        ldx     $24
+        ldy     $25
+        inx
+        bne     L85b1
+        iny
+L85b1:  stx     $fd
+        stx     $5f
+        sty     $fe
+        sty     $60
+        inx
+        stx     $3d
+        jsr     L83e6
+        jsr     L85d5
+        bcc     L85cd
+L85c4:  pla
+        sta     $5f
+        pla
+        sta     $60
+        jmp     L854b
+-----------------------------------
+L85cd:  ldx     $fc
+        dex
+        dex
+        bpl     L8581
+        bmi     L85c4
+L85d5:  lda     $2c
+        cmp     $fe
+        bne     L85df
+        lda     $2b
+        cmp     $fd
+L85df:  rts
 ; ----------------------------------------------
-; - $8582  basic command RENUMBER --------------
-; ---------------------------------------------- 
+; - $85E0  basic command RENUMBER --------------
+; ----------------------------------------------
 RENUMBER:
-        JSR L83E2
-        JSR L8E8D
-        JSR L8E83
-L858B   JSR STXTP
-        JSR L85CF
-        LDA $2B
-        LDX $2C
-        STA $22
-L8597   STX $23
-        LDY #$01 
-        JSR LDE44				; LDA ($22),Y with module off
-        TAX
-        BNE L85AA
-L85A1   JSR L8E83
-        JSR CLEARC
-        JMP L848B				; check cartridge and warm start
---------------------------------- 
-L85AA   INY
-        LDA $0133
-        STA ($22),Y
-        INY
-        LDA $0134
-        STA ($22),Y
-        LDY #$00 
-        JSR LDE44				; LDA ($22),Y with module off
-        STA $22
-        LDA $0133
-        LDY $0134
-        JSR L80CF
-        STA $0133
-        STY $0134
-        JMP L8597
---------------------------------- 
-L85CF   JSR L8FF9
-L85D2   JSR LDE60				; next CHRGET with module off
-L85D5   TAX
-        BEQ L85CF
-        JSR L9012
-        BEQ L85F0
-        TAX
-        BEQ L85CF
-        CMP #$22 
-        BNE L85D2
-L85E4   JSR LDE60				; next CHRGET with module off
-        TAX
-        BEQ L85CF
-        CMP #$22 
-        BNE L85E4
-        BEQ L85D2
-L85F0   LDA $7A
-        STA $28
-        LDA $7B
-        STA $29
-        JSR LDE60
-        BCS L85D5
-        LDY #$6B 
-        STY $55
-        LDY #$A9  				; $A96B get fixed-point number into temporary integer
-        JSR LDE0B				; JMP $A96B with module off
-        LDA $2B
-        LDX $2C
-        STA $22
-        LDA $0133
-        LDY $0134
-L8612   STX $23
-        STA $63
-        STY $62
-        LDY #$02 
-        JSR LDE44				; LDA ($22),Y with module off
-        CMP $14
-        BEQ L8637
-L8621   LDY #$01 
-        JSR LDE44				; LDA ($22),Y with module off
-        TAX
-        DEY
-        JSR LDE44				; LDA ($22),Y with module off
-        STA $22
-        LDA $63
-        LDY $62
-        JSR L80CF
-        JMP L8612
---------------------------------- 
-L8637   INY
-        JSR LDE44				; LDA ($22),Y with module off
-        CMP $15
-        BNE L8621
-        JSR L80E1
-        LDA $28
-        STA $7A
-        LDA $29
-        STA $7B
-        LDX #$00 
-L864C   LDA $0101,X
-        BEQ L8670
-        PHA
-        JSR LDE60				; next CHRGET with module off
-        BCC L8668
-        LDA $2D
-        STA $22
-        LDA $2E
-        STA $23
-        INC $2D
-        BNE L8665
-        INC $2E
-L8665   JSR LDE78				; copy ($22) one byte up until $7a/$7b with module off
-L8668   PLA
-        LDY #$00 
-        STA ($7A),Y
-        INX
-        BNE L864C
-L8670   JSR LDE60				; next CHRGET with module off
-        BCS L868D
-L8675   LDA $7A
-        STA $22
-        LDA $7B
-        STA $23
-        JSR LDEC3				; copy ($22) one byte down until $2d/$2e with module off
-        LDA $2D
-        BNE L8686
-        DEC $2E
-L8686   DEC $2D
-        JSR LDE66				; CHRGOT with module off
-        BCC L8675
-L868D   PHA
-        JSR L8E83
-        PLA
-        CMP #$2C 
-        BNE L8699
-        JMP L85F0
---------------------------------- 
-L8699  JMP L85D5
+        jsr     L846d
+L85e3:  jsr     $a68e
+L85e6:  ldy     #$02
+        lda     ($7a),y
+        bne     L8622
+        lda     $2b
+        ldx     $2c
+        sta     $22
+L85f2:  stx     $23
+        ldy     #$01
+        lda     ($22),y
+        tax
+        bne     L85fe
+        jmp     $a52a
+-----------------------------------    
+L85fe:  iny
+        lda     $0133
+        sta     ($22),y
+        iny
+        lda     $0134
+        sta     ($22),y
+        ldy     #$00
+        lda     ($22),y
+        sta     $22
+        lda     $0133
+        ldy     $0134
+        jsr     L8187
+        sta     $0133
+        sty     $0134
+        jmp     L85f2       
+---------------------------------
+L8622:  lda     $7a
+        clc
+        adc     #$04
+        sta     $7a
+        bcc     L862d
+        inc     $7b
+L862d:  jsr     CHRGET
+L8630:  tax
+        beq     L85e6
+; new in V4
+        CMP     #$22 
+        BNE     L8641
+L8637   JSR     CHRGET
+        TAX     
+        BEQ     L85e6
+        CMP     #$22 
+        BNE     L8637
+;
+L8641   cmp     #$89
+        beq     L8651
+        cmp     #$8a
+        beq     L8651
+        cmp     #$8d
+        beq     L8651
+        cmp     #$a7
+        bne     L862d
+L8651   lda     $7a
+        sta     $28
+        lda     $7b
+        sta     $29
+        jsr     CHRGET
+        bcs     L8630
+        jsr     $a96b
+        lda     $2b
+        ldx     $2c
+        sta     $24
+        lda     $0133
+        ldy     $0134
+L866D   STX     $25
+        sta     $63
+        sty     $62
+        ldy     #$01
+        lda     ($24),y
+        tax
+        bne     L8681
+        dex
+        stx     $62
+        stx     $63
+        bne     L869F
+L8681   iny
+        lda     ($24),y
+        cmp     $14
+        beq     L8698
+L8688   ldy     #$00
+        lda     ($24),y
+        sta     $24
+        lda     $63
+        ldy     $62
+        jsr     L8187
+        jmp     L866D
+---------------------------------
+L8698   iny
+        lda     ($24),y
+        cmp     $15
+        bne     L8688
+L869F   jsr     L8199
+        lda     $28
+        sta     $7a
+        lda     $29
+        sta     $7b
+        ldx     #$00 
+L86AC   lda     $0101,x
+        beq     L86E8
+        pha
+        jsr     CHRGET
+        bcc     L86E0
+        lda     $2d
+        sta     $22
+        lda     $2e
+        sta     $23
+        inc     $2d
+        bne     L86C5
+        inc     $2e
+L86C5   lda     $22
+        bne     L86CB
+        dec     $23
+L86CB   dec     $22
+        ldy     #$00
+        lda     ($22),y
+        iny
+        sta     ($22),y
+        lda     $22
+        cmp     $7a
+        bne     L86C5
+        lda     $23
+        cmp     $7b
+        bne     L86C5
+L86E0   pla
+        ldy     #$00
+        sta     ($7a),y
+        inx
+        bne     L86AC
+L86E8   jsr     CHRGET
+        bcs     L871B
+L86ED   lda     $7a
+        sta     $22
+        lda     $7b
+        sta     $23
+L86F5   ldy     #$01
+        lda     ($22),y
+        dey
+        sta     ($22),y
+        inc     $22
+        bne     L8702
+        inc     $23
+L8702   lda     $22
+        cmp     $2d
+        bne     L86F5
+        lda     $23
+        cmp     $2e
+        bne     L86F5
+        lda     $2d
+        bne     L8714
+        dec     $2e
+L8714   dec     $2d
+        jsr     CHRGOT
+        bcc     L86ED
+L871B  pha
+        jsr     $a533
+        pla
+        cmp     #$2c
+        bne     L8727
+        jmp     L8651
+---------------------------------
+L8727   jmp     L8630
 ; ----------------------------------------------
-; - $879C  basic command SINGLE STEP -----------
+; - $872A  basic command SINGLE STEP -----------
 ; ----------------------------------------------
-S_STEP: LDA #$00 
-        !by $2C					; BIT $HHLL: skip following instruction
+S_STEP: lda     #$00
+        !by     $2c
 ; ----------------------------------------------
-; - $869F  basic command TRACE -----------------
+; - $872D  basic command TRACE -----------------
 ; ----------------------------------------------
-TRACE:  LDA #$80
-        STA $0130				; trace flag
-        LDA #<LDE98				; hook $0308/$0309
-        LDX #>LDE98
-        JMP L84B5
---------------------------------- 
-L86AB   LDA $39
-        LDX $3A
-        CMP $0124
-        BNE L86BC
-        CPX $0125
-        BNE L86BC
-L86B9   JMP L878B
---------------------------------- 
-L86BC   CPX #$FF 
-        BNE L86C5
-        STX $0125
-        BEQ L86B9
-L86C5   STA $0122
-        STX $0123
-        LDX #$0B 
-L86CD   LDA $0122,X
-        STA $0124,X
-        DEX
-        BPL L86CD
-        LDA $D1
-        PHA
-        LDA $D2
-        PHA
-        LDA $D3
-        PHA
-        LDA $D6
-        PHA
-        LDA $0286
-        PHA
-        LDA #$13 
-        JSR CHROUT
-        LDX #$78 
-L86ED   LDA #$20 
-        JSR CHROUT
-        DEX
-        BNE L86ED
-        LDA #$13 
-        JSR CHROUT
-        LDY #$00 
-L86FC   TYA
-        PHA
-        LDA $0124,Y
-        TAX
-        LDA $0125,Y
-        CMP #$FF 
-        BEQ L871B
-        JSR INTOUT
-        LDA #$20 
-        JSR CHROUT
-        PLA
-        TAY
-        INY
-        INY
-        CPY #$0C 
-        BCC L86FC
-        BCS L871C
-L871B   PLA
-L871C   LDA $DA
-        ORA #$80 
-        STA $DA
-        JSR CRDO
-        LDX #$05 
-        LDY #$00 
-        STY $0F
-        STY $0B
-        LDA $3D
-        STA $5F
-        LDA $3E
-        STA $60
-        JSR LDE00				; LDA ($5F),Y with module off
-        BEQ L873C
-        LDX #$01 
-L873C   TXA
-        CLC
-        ADC $5F
-        STA $5F
-        TYA
-        ADC $60
-        STA $60
-        JSR L838E
-        JSR CRDO
-        BIT $0130				; trace flag set?
-        BMI L8760
-L8752   JSR STOPT
-        BEQ L877B
-        LDA $028E
-        CMP #$01 
-        BNE L8752
-        BEQ L876B
-L8760   LDA #$03 
-        LDX $028E
-        CPX #$01 
-        BNE L876B
-        LDA #$00 
-L876B   STA $0122
-        LDY #$78 
--       DEX
-        BNE -
-        DEY
-        BNE -
-        DEC $0122
-        BPL -
-L877B   PLA
-        STA $0286
-        PLA
-        STA $D6
-        PLA
-        STA $D3
-        PLA
-        STA $D2
-        PLA
-        STA $D1
-L878B   LDA #$E4                                ; execute statement
-        LDY #$A7 
-        JMP LDE14				; setup $55/$56 and JMP ($55) with module off
+TRACE:  lda     #$80
+        sta     $0130
+        lda     #<L8739 
+        ldx     #>L8739 
+        jmp     L850c
+---------------------------------
+L8739   lda     $39
+        ldx     $3a
+        cmp     $0124
+        bne     L874A
+        cpx     $0125
+        bne     L874A
+L8747   jmp     $a7e4
+---------------------------------
+L874A   cpx     #$ff
+        bne     L8753
+        stx     $0125
+        beq     L8747
+L8753   sta     $0122
+        stx     $0123
+        ldx     #$0b
+L875B   lda     $0122,x
+        sta     $0124,x
+        dex
+        bpl     L875B
+        lda     $d1
+        pha
+        lda     $d2
+        pha
+        lda     $d3
+        pha
+        lda     $d6
+        pha
+        lda     $0286
+        pha
+        lda     #$13
+        jsr     CHROUT
+        ldx     #$78
+L877B   lda     #$20
+        jsr     CHROUT
+        dex
+        bne     L877B
+        lda     #$13
+        jsr     CHROUT
+        ldy     #$00
+L878A   tya
+        pha
+        lda     $0124,y
+        tax
+        lda     $0125,y
+        cmp     #$ff
+        beq     L87A9
+        jsr     INTOUT
+        lda     #$20
+        jsr     CHROUT
+        pla
+        tay
+        iny
+        iny
+        cpy     #$0c
+        bcc     L878A
+        bcs     L87AA
+L87A9   pla     
+L87AA   lda     $da
+        ora     #$80
+        sta     $da
+        jsr     CRDO
+        ldx     #$05
+        ldy     #$00
+        sty     $0f
+        lda     ($3d),y
+        beq     L87BF
+        ldx     #$01
+L87BF   txa     
+        clc
+        adc     $3d
+        sta     $5f
+        tya
+        adc     $3e
+        sta     $60
+        jsr     L841A
+        jsr     CRDO
+        bit     $0130
+        bmi     L87E1
+L87D5   jsr     ISCNTC
+        lda     $028e
+        cmp     #$01
+        bne     L87D5
+        beq     L87EC
+L87E1   lda     #$03
+        ldx     $028e
+        cpx     #$01
+        bne     L87EC
+        lda     #$00
+L87EC   sta     $0122
+        ldy     #$78
+L87F1   dex
+        bne     L87F1
+        dey
+        bne     L87F1
+        dec     $0122
+        bpl     L87F1
+        pla
+        sta     $0286
+        pla
+        sta     $d6
+        pla
+        sta     $d3
+        pla
+        sta     $d2
+        pla
+        sta     $d1
+        jmp     $a7e4
 ; ----------------------------------------------
-; - #8801  basic command APPEND ----------------
+; - #880F  basic command APPEND ----------------
 ; ----------------------------------------------
-APPEND  INC $7A
-        LDA #$D4 
-        LDY #$E1 				; $e1d4 get parameters for LOAD/SAVE
-        JSR LDE09                               ; set $55/$56 and JSR ($55) with module off
-        LDX $2B					; BASIC start
-        LDA $2C
-L879F   STX $5F					; BASIC text pointer
-        STA $60
-        LDY #$00 
-        JSR LDE00				; LDA ($5F),Y with module off
-        TAX					; BASIC line link low
-        INY					; BASIC line link high
-        JSR LDE00				; LDA ($5F),Y with module off
-        BNE L879F				; not end of program
-        LDY #<LOAD
-        STY $55
-        LDY #>LOAD
-        STY $56
-        LDY $60					; load address high
-        LDX $5F					; load address low
-        STA $0133
-        STA $0A
-        STA $B9					; secondary address
-        JSR LDEE1				; do LOAD with module off
-        JMP L88E4
+APPEND: inc     $7a
+        jsr     $e1d4
+        ldx     $2b
+        lda     $2c
+L8818   stx     $5f
+        sta     $60
+        ldy     #$00
+        lda     ($5f),y
+        tax
+        iny
+        lda     ($5f),y
+        bne     L8818
+        ldy     $60
+        ldx     $5f
+        sta     $0133
+        sta     $0a
+        sta     $b9
+        jsr     $ffd5
+        jmp     L8978
 ; ----------------------------------------------
-; - $88C8 -- print free memory -----------------
+; - $8837 -- print free memory -----------------
 ; ----------------------------------------------
-PRTFRE: JSR $B526				; garbage collection
-        SEC
-        LDA $33					; bottom of string space
-        SBC $31					; minus end of arrays
-        TAX
-        LDA $34
-        SBC $32
-        JSR INTOUT				; print free bytes as unsigned integer
-        JMP L848B				; check cartridge and warm start
+PRTFRE: jsr     $b526                           ; Garbage Collection
+        sec
+        lda     $33
+        sbc     $31
+        tax
+        lda     $34
+        sbc     $32
+        jsr     INTOUT
+        jmp     READY                           ; go handle error message
 ; ----------------------------------------------
-; - $87DB -- close command and file ------------
-; ---------------------------------------------- 
-CLFILE: JSR CLRCHN
-        LDA #$FF 
-        JSR CLOSE
-        JMP L848B				; check cartridge and warm start
---------------------------------- 
-L87E6   JSR LDE60				; next CHRGET with module off
-        BEQ L87F2
-        LDA #$9E 
-        LDY #$B7 				; $b79e get byte parameter
-        JMP LDE09                               ; set $55/$56 and JSR ($55) with module off
---------------------------------- 
-L87F2   RTS
+; - $884A -- switch to uppercase ---------------
 ; ----------------------------------------------
-; - $87F3 -- open file with cmd file -----------
-; ---------------------------------------------- 
-OPNFILE:
-        LDX #$04 
-        JSR L87E6
-        STX $BA
-        LDA #$FF 
-        STA $B8
-        STA $B9
-        JSR OPEN
-        LDX #$FF 
-        JSR $E118
-        JMP LDE20				; direct mode input basic line and execute
+UPCASE: lda     #$8e
+        !by     $2c
 ; ----------------------------------------------
-; - $880B jump in for convert - "!$", "!#" -----
+; - $884D -- switch to lower case --------------
 ; ----------------------------------------------
-CONVERT:
-        JSR LDE60				; next CHRGET with module off
-        CMP #$24 
-        BNE L8825
+LOWCASE:lda     #$0e        
+        jsr     $e716
+        jmp     READY                           ; go handle error message
+; ----------------------------------------------
+; - $8855 -- close command and file ------------
+; ----------------------------------------------
+CLFILE: jsr     CLRCHN
+        lda     #$ff
+        jsr     CLOSE
+        jmp     READY                           ; go handle error message
+-----------------------------------
+L8860:  jsr     $e206
+        jmp     $b79e
+; ----------------------------------------------
+; - $8866 -- open file with cmd ----------------
+; ----------------------------------------------
+OPNFILE:inc     $7a
+        ldx     #$04
+        jsr     L8860
+        stx     $ba
+        lda     #$ff
+        sta     $b8
+        sta     $b9
+        jsr     OPEN
+        ldx     #$ff
+        jsr     $e118
+        jmp     START
+; ----------------------------------------------
+; - $8880 jump in for convert - "!$", "!#" -----
+; ----------------------------------------------
+CONVERT:      
+        jsr     CHRGET                          ; get next char
+        cmp     #$24                            ; cmpare with "$"
+        bne     CKNXT                           ; if not, check next
 ; convert dec to hex ---------------------------
-        JSR LDE60				; next CHRGET with module off
-        JSR FRMNUM
-        JSR GETADR
-        JSR L9B2B
-        TYA
-        JSR L9B2B
-        JMP L848B				; check cartridge and warm start
-; - $888C - check for # ------------------------ 
-L8825   CMP #$23 
-        BEQ L882C
-        JMP LDE20				; direct mode input basic line and execute
-; - $8893 - convert hex to dec ----------------- 
-L882C   LDA #$00 
-        STA $62
-        STA $63
-        LDX #$05 
-L8834   JSR LDE60				; next CHRGET with module off
-        BEQ L884E
-        DEX
-        BNE L883F
-L883C   JMP ERRFC
-; - $883F -------------------------------------- 
-L883F   JSR L885C
-        BCS L883C
-L8844   ROL
-        ROL $63
-        ROL $62
-        DEY
-        BNE L8844
-        BEQ L8834
-L884E   JSR INTOUT1
-        JMP L848B				; check cartridge and warm start
---------------------------------- 
-L8854   JSR L8857
-L8857   LDA #$20 
-        JMP CHROUT
---------------------------------- 
-L885C   BCC L886A
-        CMP #$41 
-        BCS L8864
-L8862   SEC
-        RTS
---------------------------------- 
-L8864   CMP #$47 
-        BCS L8862
-        SBC #$06 
-L886A   LDY #$04 
-        ASL
-        ASL
-        ASL
-        ASL
-        CLC
-        RTS
+        jsr     CHRGET                          ; get next char
+        jsr     FRMNUM                          ; evaluate expression and check is numeric, else do type mismatch                                
+        jsr     GETADR                          ; convert FAC_1 to integer in temporary integer
+        jsr     HEXOUT                          ; output high byte as hex
+        tya                                     ; get low byte
+        jsr     HEXOUT                          ; output low byte as hex
+        jmp     READY                           ; go handle error message
+; - $889A - check for # ------------------------
+CKNXT:  cmp     #$23                            ; compare with "#"
+        beq     CNVDEC                          ; branch if ok
+        jmp     START                           ; command not known, go back do start over
+; - $88A1 - convert hex to dec -----------------
+CNVDEC: lda     #$00                            ; loaad 00
+        sta     $62                             ; clear $62
+        sta     $63                             ; clear $63
+        ldx     #$05                            ; load counter
+L88A9   jsr     CHRGET                          ; get next char, should be a number
+        beq     OUT                             ; if there is nothing more
+        dex                                     ; dec counter
+        bne     ISCHAR                          ; have a char
+L88B1   jmp     ERRFC                           ; llegal quantity error
+; - $88B4 --------------------------------------
+ISCHAR: jsr     L88D1
+        bcs     L88B1
+L88B9   rol
+        rol     $63
+        rol     $62
+        dey
+        bne     L88B9
+        beq     L88A9
+OUT:    jsr     INTOUT1
+        jmp     READY                           ; ready
+---------------------------------
+L88C9   jsr     L88CC
+L88CC   lda     #$20
+        jmp     CHROUT
+---------------------------------
+L88D1   bcc     ISNUM                           ; is number
+        cmp     #$41                            ; cmp "A"
+        bcs     IF_F                            ; branch if equal or higher
+L88D7   sec                                     ; set carry for error
+        rts    
+; - $88D9 - is number --------------------------      
+IF_F:   cmp     #$47                            ; cmp "F"
+        bcs     L88D7                           ; go set carry for error
+        sbc     #$06
+; - $88DF - is number --------------------------
+ISNUM:  ldy     #$04
+        asl
+        asl
+        asl
+        asl
+        clc
+        rts        
+; - $88E7 output accu as hex value -------------
+HEXOUT: pha
+        lsr
+        lsr
+        lsr
+        lsr
+        jsr     L88F0
+        pla
+L88F0   and     #$0f
+        ora     #$30
+        cmp     #$3a
+        bcc     L88FA
+        adc     #$06
+L88FA   jmp     CHROUT
 ; ----------------------------------------------
-; - $8872 Save a programm ----------------------
-; ---------------------------------------------- 
-SAVEPRG:
-        JSR L892D
-L8875   LDX $2D
-        LDY $2E
-        LDA #$2B 
-        JSR LDE70				; SAVE with module off
-        BCC L8883
-        JMP EREXIT
---------------------------------- 
-L8883   JSR L8A78
-        LDA $0100
-        CMP #$36 
-        BEQ L8890
-L888D   JMP L848B				; check cartridge and warm start
---------------------------------- 
-L8890   LDA $0101
-        CMP #$33 
-        BNE L888D
-        LDA #<L9D7C 
-        LDY #>L9D7C 
-        JSR STROUT
-L889E   JSR GETIN
-        CMP #$4E				; "n"
-        BEQ L888D
-        CMP #$59				; 'y'
-        BEQ L88AD
-        CMP #$4A				; "j"
-        BNE L889E
-L88AD   LDA #$53				; "s"
-        STA $01FF
-        LDA #$3A				; ":"
-        CMP $0202
-        BNE L88BB
-        LDA #$20 
-L88BB   STA $0200
-        LDA #$FF 
-        STA $BB
-        DEC $BC
-        INC $B7
-        INC $B7
-        JSR L8AC0
-        DEC $B7
-        DEC $B7
-        JSR L8945
-        JMP L8875
+; - $88FD Save a programm ----------------------
 ; ----------------------------------------------
-; - $88D5 load prg relative --------------------
+SAVEPRG:jsr     L89B9                           ; get name
+L8900:  ldx     $2d                             ; end low byte
+        ldy     $2e                             ; end high byte
+        lda     #$2b                            ; start adress low byte
+        jsr     SAVE                            ; save prg
+        bcc     L890E                           ; no error
+        jmp     EREXIT                          ;              
+---------------------------------
+L890E   jsr     L8B30
+        lda     $0100
+        cmp     #$30
+        bne     L891B
+        jmp     READY                           ; go handle error message
+---------------------------------
+L891B   cmp     #$36
+        beq     L8922
+L891F   jmp     READY                           ; go handle error message
+---------------------------------
+L8922   lda     $0101
+        cmp     #$33
+        bne     L891F
+        ldy     #$00
+L892B   lda     OVWTXT,y
+        beq     L8936
+        jsr     CHROUT
+        iny
+        bne     L892B
+L8936   jsr     GETIN
+        cmp     #$4e                            ; "n"
+        beq     L891F
+        cmp     #$4a                            ; "j"
+        bne     L8936
+        lda     #$53                            ; "s"
+        sta     $01ff
+        lda     #$3a                            ; ":"
+        cmp     $0202
+        bne     L894F
+        lda     #$20
+L894F   sta     $0200
+        lda     #$ff
+        sta     $bb
+        dec     $bc
+        inc     $b7
+        inc     $b7
+        jsr     L8B78
+        dec     $b7
+        dec     $b7
+        jsr     L89D1
+        jmp     L8900
 ; ----------------------------------------------
-LDREL:  LDA #$00 
-        !by $2C					; BIT $HHLL: skip following instruction
+; - $8969 load prg relative --------------------
 ; ----------------------------------------------
-; - $88D8 load and run prg relative ------------
+LDREL:  lda     #$00
+        !by     $2C
 ; ----------------------------------------------
-LDRUN:  LDA #$80
-        STA $0133
-        LDA #$00 
-        STA $B9
-L88E1   JSR L8957
-L88E4   BCC L88E9
-        JMP EREXIT
---------------------------------- 
-L88E9   JSR $FFB7
-        AND #$BF 
-        BEQ L88F3
-        JMP L8A72
---------------------------------- 
-L88F3   STX $2D
-        STY $2E
-        BIT $0133
-        BMI L8903
-        LDA #$AB                                ; print 'ready'   
-        LDY #$E1 
-        JMP LDE14				; setup $55/$56 and JMP ($55) with module off
---------------------------------- 
-L8903   JSR $A659
-        JSR L8E83
-        JSR STXTP
-        LDA #$AE                                ; PERFORM NEXT STATEMENT 
-        LDY #$A7 
-        JMP LDE14				; setup $55/$56 and JMP ($55) with module off
+; - $896c load and run prg relative ------------
 ; ----------------------------------------------
-; - $8913 Verify "<" ---------------------------
-; ---------------------------------------------- 
-VERIFY: LDA #$00 
-        STA $B9
-        LDA #$01 
-        JSR L8957
-        JSR $E17E
-        JMP L848B				; check cartridge and warm start
+LDRUN:  lda     #$80
+        sta     $0133
+        lda     #$00
+        sta     $b9
+L8975   jsr     L89E3
+L8978   bcc     L897D
+        jmp     EREXIT
+---------------------------------
+L897D   jsr     $ffb7
+        and     #$bf
+        beq     L8987
+        jmp     L8B2A
+---------------------------------
+L8987   stx     $2d
+        sty     $2e
+        bit     $0133
+        bmi     L8993
+        jmp     $e1ab
+---------------------------------
+L8993   jsr     $a659
+        jsr     $a533
+        jsr     STXTP
+        jmp     $a7ae
 ; ----------------------------------------------
-; - $8922 load prg absolut ---------------------
-; ---------------------------------------------- 
-LDABS:  LDA #$01 
-        STA $B9
-        LDA #$00 
-        STA $0133
-        BEQ L88E1
-L892D   LDY #$00 
-L892F   INY
-        LDA $0200,Y
-        BNE L892F
-        DEY
-        STY $B7
-L8938   LDA $B8
-        STA $0134
-        LDA $9A
-        STA $0135
-        JSR CLRCHN
-L8945   LDY #$01 
-        STY $BB
-        LDY #$02 
-        STY $BC
-        LDY #$00 
-        STY $90
-        LDA $0131
-        STA $BA
-        RTS
---------------------------------- 
-L8957   STA $0A
-        JSR L892D
-        LDA $0A
-        LDX $2B
-        LDY $2C
-        JMP $FFD5
+; - $899F Verify "<" ---------------------------
 ; ----------------------------------------------
-; - $8965 load directory -----------------------
-; ---------------------------------------------- 
-LDDIR:  LDA $9A
-        CMP #$03 
-        BNE L8970
-        LDA #$93 
-        JSR CHROUT
-L8970   JSR L892D
-        DEC $BB
-        INC $B7
-        LDA #$60 
-        STA $B9
-        JSR L9AC3
-        LDA #$00 
-        STA $90
-        LDY #$06 
-L8984   STY $B7
-        LDA $0131
-        STA $BA
-        JSR TALK
-        LDA #$60 
-        STA $B9
-        JSR TKSA
-        LDY #$00 
-        LDA $90
-        BNE L89B2
-L899B   JSR IECIN
-        STA $0200,Y
-        CPY $B7
-        BCC L89A8
-        TAX
-        BEQ L89B2
-L89A8   INY
-        LDA $90
-        BEQ L899B
-        LDA #$00 
-        STA $0200,Y
-L89B2   STY $FB
-        LDA $90
-        STA $FC
-        JSR UNTALK
-        LDA $0135
-        CMP #$03 
-        BEQ L89C8
-        LDX $0134
-        JSR CHKOUT
-L89C8   LDY $B7
-        CPY $FB
-        BCS L89EA
-        LDA $01FF,Y
-        LDX $01FE,Y
-        JSR INTOUT
-        JSR L8857
-        LDY $B7
-L89DC   LDA $0200,Y
-        BEQ L89E7
-        JSR CHROUT
-        INY
-        BNE L89DC
-L89E7   JSR CRDO
-L89EA   JSR CLRCHN
-        LDA $FC
-        BNE L8A14
-L89F1   JSR L810A
-        BEQ L8A14
-        LDA $0135
-        CMP #$03 
-        BNE L8A0F
-        LDA $D6
-        CMP #$18 
-        BNE L8A0F
-        JSR GETIN
-        CMP #$04 
-        BCC L89F1
-        LDA #$93 
-        JSR CHROUT
-L8A0F   LDY #$04 
-        JMP L8984
---------------------------------- 
-L8A14   LDA #$60 
-        STA $B9
-        LDA $0131
-        STA $BA
-        JSR $F642
-        LDA $0135
-        CMP #$03 
-        BEQ L8A2D
-        LDX $0134
-        JSR CHKOUT
-L8A2D   JMP L848B				; check cartridge and warm start
+VERIFY: lda     #$00
+        sta     $b9
+        lda     #$01
+        jsr     L89E3
+        jsr     $e17e
+        jmp     READY                           ; go handle error message
 ; ----------------------------------------------
-; - $8A30  set IO number -----------------------
-; ---------------------------------------------- 
-SETIONO:
-        LDX #$08 
-        JSR L87E6
-        CPX #$04 
-        BCC L8A43
-        CPX #$10 
-        BCS L8A43
-        STX $0131
-        JMP L848B				; check cartridge and warm start
---------------------------------- 
-L8A43   JMP L883C
+; - $89AE load prg absolut ---------------------
 ; ----------------------------------------------
-; -- $8A46 read chanel 15 ">" ------------------
-; ---------------------------------------------- 
-RDCH15: LDY #$01 
-        LDA ($7A),Y
-        BNE L8A63
-        JSR L8938
-        JSR L8AB3
-        JSR IECIN
-        PHA
-        JSR UNTALK
-        PLA
-        JSR L9B2B
-        JSR CRDO
-        JMP L848B				; check cartridge and warm start
---------------------------------- 
-L8A63   JSR L892D
-        JSR L8AC0
-        JMP L848B				; check cartridge and warm start
+LDABS:  lda     #$01
+        sta     $b9
+        lda     #$00
+        sta     $0133
+        beq     L8975
+L89B9   ldy     #$00
+L89BB   iny
+        lda     $0200,y
+        bne     L89BB
+        dey
+        sty     $b7
+L89C4   lda     $b8
+        sta     $0134
+        lda     $9a
+        sta     $0135
+        jsr     CLRCHN
+L89D1   ldy     #$01
+        sty     $bb
+        ldy     #$02
+        sty     $bc
+        ldy     #$00
+        sty     $90
+        lda     IONO
+        sta     $ba
+        rts
+---------------------------------
+L89E3   sta     $0a
+        jsr     L89B9
+        lda     $0a
+        ldx     $2b
+        ldy     $2c
+        jmp     $ffd5
 ; ----------------------------------------------
-; - $8A6C read disk channel --------------------
+; - $89F1 load directory -----------------------
 ; ----------------------------------------------
-RDDCH:  LDY #$01 
-        LDA ($7A),Y
-        BNE L8A63
-L8A72   JSR L8A78
-        JMP L848B				; check cartridge and warm start
---------------------------------- 
-L8A78   JSR L8938
-        JSR L8AB3
-        LDY #$00 
-L8A80   JSR IECIN
-        STA $0100,Y
-        CMP #$0D 
-        BEQ L8A94
-        INY
-        LDA $90
-        BEQ L8A80
-        LDA #$0D 
-        STA $0100,Y
-L8A94   JSR UNTALK
-        JSR CRDO
-        LDY #$00 
-L8A9C   LDA $0100,Y
-        JSR CHROUT
-        INY
-        CMP #$0D 
-        BNE L8A9C
-        RTS
---------------------------------- 
-        JSR L8AB2
-        JSR CHROUT
-        LDA #$6F 
-        STA $B9
-L8AB2   RTS
---------------------------------- 
-L8AB3   LDA $BA
-        JSR TALK
-        LDA #$6F 
-        STA $B9
-        JMP TKSA
---------------------------------- 
-        RTS
---------------------------------- 
-L8AC0   LDA $BA
-        JSR LISTN
-        LDA #$6F 
-        STA $B9
-        JMP $F3EA
+LDDIR:  lda     $9a
+        cmp     #$03
+        bne     L89FC
+        lda     #$93
+        jsr     CHROUT
+L89FC   jsr     L89B9
+        dec     $bb
+        inc     $b7
+        lda     #$60
+        sta     $b9
+        jsr     L8AC8
+        bcc     L8A0F
+        jmp     EREXIT
+---------------------------------
+L8A0F   lda     #$00
+        sta     $90
+        ldy     #$06
+L8A15   sty     $b7
+        lda     IONO
+        sta     $ba
+        jsr     TALK
+        lda     #$60
+        sta     $b9
+        jsr     TKSA
+        ldy     #$00
+        lda     $90
+        bne     L8A43
+L8A2C   jsr     IECIN
+        sta     $0200,y
+        cpy     $b7
+        bcc     L8A39
+        tax
+        beq     L8A43
+L8A39   iny
+        lda     $90
+        beq     L8A2C
+        lda     #$00
+        sta     $0200,y
+L8A43   sty     $fb
+        lda     $90
+        sta     $fc
+        jsr     UNTALK
+        lda     $0135
+        cmp     #$03
+        beq     L8A59
+        ldx     $0134
+        jsr     CHKOUT
+L8A59   ldy     $b7
+        cpy     $fb
+        bcs     L8A7B
+        lda     $01ff,y
+        ldx     $01fe,y
+        jsr     INTOUT
+        jsr     L88CC
+        ldy     $b7
+L8A6D   lda     $0200,y
+        beq     L8A78
+        jsr     CHROUT
+        iny
+        bne     L8A6D
+L8A78   jsr     CRDO
+L8A7B   jsr     CLRCHN
+        lda     $fc
+        bne     L8AAC
+L8A82   jsr     STOPT
+        beq     L8AAC
+        lda     $028e
+        cmp     #$01
+        beq     L8A82
+        lda     $0135
+        cmp     #$03
+        bne     L8AA7
+        lda     $d6
+        cmp     #$18
+        bne     L8AA7
+        jsr     GETIN
+        cmp     #$04
+        bcc     L8A82
+        lda     #$93
+        jsr     CHROUT
+L8AA7   ldy     #$04
+        jmp     L8A15
+---------------------------------
+L8AAC   lda     #$60
+        sta     $b9
+        lda     IONO
+        sta     $ba
+        jsr     $f642
+        lda     $0135
+        cmp     #$03
+        beq     L8AC5
+        ldx     $0134
+        jsr     CHKOUT
+L8AC5   jmp     READY 
+---------------------------------
+L8AC8   jsr     $f3d5
+        rts
 ; ----------------------------------------------
-; - $8ACC  Monitor commands handling -----------
-; ---------------------------------------------- 
-MONI:   LDX #$01 
-        STX $0A
-        DEX
-        STX $0133
-        STX $0134
-L8AD7   STX $0135
-L8ADA   JSR L8C58
-        JSR L8857
-        LDA $FD
-        TAX
-        AND #$7F 
-        CMP #$20 
-        BCS L8AEB
-        LDX #$20 
-L8AEB   TXA
-        JSR CHROUT
+; - $8ACC  set IO number -----------------------
+; ----------------------------------------------
+SETIONO:jsr     CHRGET                          ; get char
+        bcs     L8ADD                           ; branch if not a number
+        and     #$0f                            
+        beq     SETIONO                         ; branch if zero
+        tax                                     ; save to X
+        jsr     CHRGET                          ; get next char
+        beq     L8AF0                           ; 
+        bcc     L8AE0
+L8ADD:  jmp     SNERR                           ; syntax error
+---------------------------------
+L8AE0   pha
+        jsr     CHRGET
+        bne     L8ADD
+        pla
+        and     #$0f
+        cpx     #$01
+        bne     L8ADD
+        adc     #$09
+        tax   
+L8AF0   cpx     #$04
+        bcc     L8ADD
+        cpx     #$10
+        bcs     L8ADD
+        stx     IONO
+        jmp     READY                           ; go handle error message
+; ----------------------------------------------
+; -- $8AFE read chanel 15 ">" ------------------
+; ----------------------------------------------
+RDCH15: ldy     #$01
+        lda     ($7a),y
+        bne     L8B1B
+        jsr     L89C4
+        jsr     L8B6B
+        jsr     IECIN
+        pha
+        jsr     UNTALK
+        pla
+        jsr     HEXOUT
+        jsr     CRDO
+        jmp     READY                           ; go handle error message
+---------------------------------
+L8B1B   jsr     L89B9
+        jsr     L8B78
+        jmp     READY                           ; go handle error message
+; ----------------------------------------------
+; - $8B24 read disk channel --------------------
+; ----------------------------------------------
+RDDCH:  ldy     #$01
+        lda     ($7a),y
+        bne     L8B1B
+L8B2A   jsr     L8B30
+        jmp     READY                           ; go handle error message
+---------------------------------
+L8B30   jsr     L89C4
+        jsr     L8B6B
+        ldy     #$00
+L8B38   jsr     IECIN
+        sta     $0100,y
+        cmp     #$0d
+        beq     L8B4C
+        iny
+        lda     $90
+        beq     L8B38
+        lda     #$0d
+        sta     $0100,y
+L8B4C   jsr     UNTALK
+        jsr     CRDO
+        ldy     #$00
+L8B54   lda     $0100,y
+        jsr     CHROUT
+        iny
+        cmp     #$0d
+        bne     L8B54
+        rts
+---------------------------------
+        jsr     L8B6A
+        jsr     CHROUT
+        lda     #$6f
+        sta     $b9
+L8B6A   rts
+---------------------------------
+L8B6B   lda     $ba
+        jsr     TALK
+        lda     #$6f
+        sta     $b9
+        jmp     TKSA
+---------------------------------
+        rts
+---------------------------------
+L8B78   lda     $ba
+        jsr     LISTN
+        lda     #$6f
+        sta     $b9
+        jmp     $f3ea
+; ----------------------------------------------
+; - $8B84  Monitor commands handling -----------
+; ----------------------------------------------
+MONI:   ldx     #$00
+        stx     $0133
+        stx     $0134
+L8B8C   stx     $0135
+L8B8F   jsr     L8CB5
 ; ----------------------------------------------
 ; ----- check monitor commands: ----------------
 ; ----------------------------------------------
-        JSR GETIN
-        LDX #$02 
-        CMP #$2F                                ; "/" modify data
-        BEQ L8AD7
-        DEX
-        DEX
-        CMP #$2B                                ; "+" modify address
-        BEQ L8AD7
-        CMP #$5D                                ; "]" output on screen
-        BEQ L8B1E
-        CMP #$3E                                ; ">" computer memory
-        BEQ L8B0B
-        DEX
-        CMP #$3C                                ; "<" floppy memory
-        BNE L8B11
-L8B0B   STX $0133
-        JSR L8C4D
-L8B11   CMP #$2A                                ; "*" run
-        BNE L8B1A
-        JSR L8D1B
-        LDA #$00 
-L8B1A   CMP #$5B                                ; "[" output on printer
-        BNE L8B23
-L8B1E   STX $0134
-        BEQ L8ADA
-L8B23   CMP #$0D                                ; "RETURN" inc address
-        BNE L8B2A
-        JSR L8C3F
-L8B2A   CMP #$2E 
-        BNE L8B36
-        INC $0A
-        LDA $0A
-        AND #$01 
-        STA $0A
-L8B36   CMP #$5E                                ; "^" dec address"
-        BNE L8B45
-        LDX $FB
-        BNE L8B40
-        DEC $FC
-L8B40   DEC $FB
-        JSR L8C4D
-L8B45   CMP #$20                                ; " " dissasemble continous
-        BNE L8B4C
-        JSR L8D28
-L8B4C   CMP #$2D                                ; "-" dissasemble 1 line
-        BNE L8B53
-        JSR L8D52
-L8B53   CMP #$40                                ; "@" transfer
-        BNE L8B5C
-        JSR L8B96
-        LDA #$00 
-L8B5C   CMP #$3D                                ; "=" exit monitor
-        BNE L8B63
-        JMP L848B				; check cartridge and warm start
---------------------------------- 
-L8B63   JSR $007C
-        JSR L885C
-        BCS L8B93
-        LDX $0135
-L8B6E   ROL
-        ROL $FB,X
-        ROL $FC,X
-        DEY
-        BNE L8B6E
-        TXA
-        BEQ L8B83
-        LDX $0133
-        BEQ L8B8F
-        LDX #$57 
-        JSR L8C7E
-L8B83   LDX $0133
-        BEQ L8B93
-        LDX #$52 
-        JSR L8C7E
-        BEQ L8B93
-L8B8F   LDA $FD
-        STA ($FB),Y
-L8B93   JMP L8ADA
---------------------------------- 
-L8B96   LDA $0A
-        BEQ L8BBC
-        LDA $25
-        BPL L8BBC
-        CMP #$A0 
-        BCS L8BA8
-L8BA2   JSR L8BB8
-        INC $0A
-        RTS
---------------------------------- 
-L8BA8   LDX $23
-        CPX #$A0 
-        BCC L8BA2
-        CMP #$DE 
-        BCC L8BBC
-        CPX #$DF 
-        BCS L8BBC
-        BCC L8BA2
-L8BB8   LDA #$00 
-        STA $0A
-L8BBC   JSR L8CDD
-        LDX $FB
-        STX $26
-        LDA $FC
-        STA $27
-        CMP $23
-        BNE L8BCD
-        CPX $22
-L8BCD   BCC L8C17
-        BEQ L8C17
-        LDX #$24 
-        STX $0254
-        LDA $24
-        SEC
-        SBC $22
-        TAX
-        LDA $25
-        SBC $23
-        TAY
-        TXA
-        CLC
-        ADC $26
-        STA $26
-        TYA
-        ADC $27
-        STA $27
-        LDX #$37 
-L8BEE   LDA $24
-        BNE L8BF4
-        DEC $25
-L8BF4   DEC $24
-        LDA $26
-        BNE L8BFC
-        DEC $27
-L8BFC   DEC $26
-        LDA $25
-        CMP $23
-        BNE L8C08
-        LDA $24
-        CMP $22
-L8C08   BCC L8C14
-        LDY #$00 
-        JSR $024C
-        STA ($26),Y
-        TYA
-        BEQ L8BEE
-L8C14   JMP L8CDD
---------------------------------- 
-L8C17   LDX #$22 
-        STX $0254
-        LDX #$37 
-L8C1E   LDA $23
-        CMP $25
-        BNE L8C28
-        LDA $22
-        CMP $24
-L8C28   BCS L8C14
-        LDY #$00 
-        JSR $024C
-        STA ($26),Y
-        INC $22
-        BNE L8C37
-        INC $23
-L8C37   INC $26
-        BNE L8C1E
-        INC $27
-        BNE L8C1E
-L8C3F   JSR CRDO
-L8C42   INC $FB
-        BNE L8C48
-        INC $FC
-L8C48   LDY #$00 
-        JSR L8CEC
-L8C4D   LDA $0133
-        BEQ L8C57
-        LDX #$52 
-        JSR L8C7E
-L8C57   RTS
---------------------------------- 
-L8C58   LDY #$00 
-        STY $D3
-        LDA #$40 
-        LDX $0133
-        BNE L8C6A
-        JSR L8CE9
-        LDA $0A
-        ORA #$30 
-L8C6A   JSR CHROUT
-        JSR L8857
-        JSR L9B24
-        JSR L8854
-        LDA $FD
-        JSR L9B2B
-        JMP L8857
---------------------------------- 
-L8C7E   LDA $0131
-        STA $BA
-        JSR LISTN
-        LDA #$6F 
-        STA $B9
-        JSR SECND
-        LDA #$4D 
-        JSR CIOUT
-        LDA #$2D 
-        JSR CIOUT
-        TXA
-        JSR CIOUT
-        LDA $FB
-        JSR CIOUT
-        LDA $FC
-        JSR CIOUT
-        CPX #$57 
-        BNE L8CB3
-        LDA #$01 
-        JSR CIOUT
-        LDA $FD
-        JSR CIOUT
-L8CB3   JSR UNLSN
-        CPX #$52 
-        BNE L8CCD
-        LDA $0131
-        JSR TALK
-        LDA $B9
-        JSR TKSA
-        JSR IECIN
-        STA $FD
-        JSR UNTALK
-L8CCD   LDA #$00 
-        RTS
---------------------------------- 
-L8CD0   SEI
-        LDA $0A
-        BNE L8CD7
-        STY $01
-L8CD7   LDA ($FB),Y
-        STX $01
-        CLI
-        RTS
---------------------------------- 
-L8CDD   LDX #$0C 
-L8CDF   LDA L8CD0,X
-        STA $024C,X
-        DEX
-        BPL L8CDF
-        RTS
---------------------------------- 
-L8CE9   JSR L8CDD
-L8CEC   LDX #$37 
-        LDA $0A
-        BEQ L8D15
-        LDA $FC
-        BPL L8D08
-        CMP #$DE 
-        BEQ L8D0D
-        CMP #$A0 
-        BCS L8D08
-        LDA #$00 
-        STA $0A
-        JSR L8D15
-        INC $0A
-        RTS
---------------------------------- 
-L8D08   LDA ($FB),Y
-        STA $FD
-        RTS
---------------------------------- 
-L8D0D   INC $FC
-        LDA ($FB),Y
-        DEC $FC
-        BNE L8D18
-L8D15   JSR $024C
-L8D18   STA $FD
-        RTS
---------------------------------- 
-L8D1B   LDX $0133
-        BEQ L8D25
-        LDX #$45 
-        JMP L8C7E
---------------------------------- 
-L8D25   JMP ($00FB)
---------------------------------- 
-L8D28   JSR L810A
-        BNE L8D30
-        RTS
---------------------------------- 
-        BEQ L8D28
-L8D30   JSR L8D52
-        JMP L8D28
---------------------------------- 
-L8D36   JSR CLRCHN
-        JSR L8C42
-L8D3C   BIT $0134
-        BPL L8D51
-        LDA #$04 
-        STA $9A
-        STA $BA
-        JSR LISTN
-        LDA #$FF 
-        STA $B9
-        JMP SCATN
---------------------------------- 
-L8D51  RTS
---------------------------------- 
-L8D52   JSR L8D3C
-        JSR L8C58
-        LDA $FD
-        TAY
-        LSR
-        BCC L8D69
-        LSR
-        BCS L8D78
-        CMP #$22 
-        BEQ L8D78
-        AND #$07 
-        ORA #$80 
-L8D69   LSR
-        TAX
-        LDA L9C5B,X
-        BCS L8D74
-        LSR
-        LSR
-        LSR
-        LSR
-L8D74   AND #$0F 
-        BNE L8D7C
-L8D78   LDA #$00 
-        LDY #$80 
-L8D7C   TAX
-        LDA L9C9F,X
-        STA $0113
-        AND #$03 
-        STA $0112
-        TYA
-        AND #$8F 
-        TAX
-        TYA
-        LDY #$03 
-        CPX #$8A 
-        BEQ L8D9E
-L8D93   LSR
-        BCC L8D9E
-        LSR
-L8D97   LSR
-        ORA #$20 
-        DEY
-        BNE L8D97
-        INY
-L8D9E   TAX
-        DEY
-        BNE L8D93
-        LDA L9CB9,X
-        STA $0110
-        LDA L9CF9,X
-        STA $0111
-        LDX #$00 
-L8DB0   STX $0114
-        CPX $0112
-        BCC L8DBD
-        JSR L8854
-         BNE L8DCA
-L8DBD  JSR L8D36
-        LDA $FD
-        LDX $0114
-        STA $FE,X
-        JSR L9B2B
-L8DCA   JSR L8857
-        LDX $0114
-        INX
-        CPX #$03 
-        BNE L8DB0
-L8DD5   LDA #$00 
-        LDY #$05 
-L8DD9   ASL $0111
-        ROL $0110
-        ROL
-        DEY
-        BNE L8DD9
-        ORA #$40 
-        CMP #$40 
-        BNE L8DEB
-        LDA #$2A 
-L8DEB   JSR CHROUT
-        DEX
-        BNE L8DD5
-        JSR L8854
-        LDX #$06 
-L8DF6   CPX #$04 
-        BNE L8E1D
-        LDA $0111
-        BNE L8E02
-        JSR L8857
-L8E02   LDY $0112
-        BEQ L8E1D
-        LDA $0113
-        CMP #$84 
-        BCS L8E3F
-L8E0E   LDA $00FD,Y
-        STX $0114
-        JSR L9B2B
-        LDX $0114
-        DEY
-        BNE L8E0E
-L8E1D   ASL $0113
-        BCC L8E33
-        INC $0111
-        LDA L9CAC,X
-        JSR CHROUT
-        LDA L9CB2,X
-        BEQ L8E33
-        JSR CHROUT
-L8E33   DEX
-        BNE L8DF6
-L8E36   JSR CRDO
-        JSR L8D36
-        JMP CLRCHN
---------------------------------- 
-L8E3F   LDX $FC
-        LDA $FE
-        BPL L8E46
-        DEX
-L8E46   ADC $FB
-        BCC L8E4B
-        INX
-L8E4B   TAY
-        TXA
-        JSR L9B2B
-        TYA
-        JSR L9B2B
-        JMP L8E36
-; - $8E57  basic command CHECK UNDEF'D --------- 
-UNDEF:  JSR L8E8A
-; - $8E5A  basic command COMPACTOR -------------
-COMPACTOR:
-        JSR L8E6C
-        LDX #$01 
-        STX $0133
-        STX $0135
-        DEX
-        STX $0134
-        JMP L858B
---------------------------------- 
-L8E6C   LDX #$F0 
-        JSR L87E6
-        TXA
-        BNE L8E77
-L8E74   JMP L883C
---------------------------------- 
-L8E77   CPX #$F1 
-        BCS L8E74
-        STX $FD
-        JSR L8E8D
-        JSR L8ED3
-L8E83   LDA #$33 
-        LDY #$A5 				; $a533 rebuild BASIC line chaining
-        JMP LDE09                               ; set $55/$56 and JSR ($55) with module off
---------------------------------- 
-L8E8A   LDA #$01 
-        !by $2C					; BIT $HHLL: skip following instruction
-L8E8D   LDA #$00
-        STA $0112
-        JSR L8EA0
-        LDA $0112
-        BNE L8E9B
-        RTS
---------------------------------- 
-L8E9B   PLA
-        PLA
-        JMP L85A1
---------------------------------- 
-L8EA0   JSR STXTP
-L8EA3   JSR L8FF9
-L8EA6   JSR LDE60				; next CHRGET with module off
-L8EA9   TAX
-        BEQ L8EA3
-        JSR L9044
-        BCC L8EA9
-        JSR L9012
-        BNE L8EA6
-L8EB6   JSR LDE60				; next CHRGET with module off
-        BCS L8EA9
-        JSR L90BF
-        BCS L8ECC
-        JSR L902B
-L8EC3   JSR LDE66				; CHRGOT with module off
-        CMP #$2C 
-        BNE L8EA9
-        BEQ L8EB6
-L8ECC   DEY
-        LDA #$FF 
-        STA ($5F),Y
-        BMI L8EC3
-L8ED3   LDY #$00 
-        STY $0112
-        STY $0113
-        STY $0114
-        JSR STXTP
-L8EE1   LDA $7A
-        STA $45
-        LDA $7B
-        STA $46
-        JSR L8FF9
-        INC $7A
-        BNE L8EF2
-        INC $7B
-L8EF2   JSR L903B
-        LDA $0112
-        BNE L8F01
-L8EFA   LDA #$00 
-        STA $0114
-        BEQ L8F43
-L8F01   LDY #$FF 
-        LDA $3D
-        STA $22
-        LDA $3E
-        STA $23
-L8F0B   INY
-        JSR LDE44				; LDA ($22),Y with module off
-        BNE L8F0B
-        TYA
-        CLC
-        ADC $0114
-        BCS L8EFA
-        CMP $FD
-        BCS L8EFA
-        LDY #$02 
-        JSR LDE32				; LDA ($45),Y with module off
-        CMP #$FF 
-        BEQ L8EFA
-        LDY #$00 
-        LDA $0113
-        BEQ L8F36
-        LDA #$22 
-        STA ($45),Y
-        INC $45
-        BNE L8F36
-        INC $46
-L8F36   LDA #$3A 
-        STA ($45),Y
-        INC $45
-        BNE L8F40
-        INC $46
-L8F40   JSR L9081
-L8F43   LDX #$00 
-        STX $0113
-        INX
-        STX $0112
-        INC $0114
-L8F4F   LDY #$00 
-L8F51   JSR LDE3B				; LDA ($7A),Y with module off
-        BNE L8F59
-        JMP L8EE1
---------------------------------- 
-L8F59   INC $7A
-        BNE L8F5F
-        INC $7B
-L8F5F   INC $0114
-        CMP #$22 
-        BNE L8F7F
-L8F66   JSR LDE3B				; LDA ($7A),Y with module off
-        BNE L8F70
-        INC $0113
-        BNE L8F51
-L8F70   INC $7A
-        BNE L8F76
-        INC $7B
-L8F76   INC $0114
-        CMP #$22 
-        BNE L8F66
-        BEQ L8F51
-L8F7F   CMP #$8B 
-        BNE L8F8A
-L8F83   LDA #$00 
-        STA $0112
-        BEQ L8F51
-L8F8A   CMP #$8D 
-        BEQ L8F51
-        JSR L9012
-        BEQ L8F83
-        CMP #$20 
-        BNE L8FA3
-        JSR L90F9
-L8F9A   JSR L903B
-        JSR L9081
-        JMP L8F4F
---------------------------------- 
-L8FA3   CMP #$8F 
-        BNE L8FC6
-        JSR L90F9
-        LDA #$3A 
-        STA ($45),Y
-        INC $45
-        BNE L8FB4
-        INC $46
-L8FB4   JSR LDE3B				; LDA ($7A),Y with module off
-L8FB7   BEQ L8F51
-L8FB9   INC $7A
-        BNE L8FBF
-        INC $7B
-L8FBF   JSR LDE3B				; LDA ($7A),Y with module off
-        BNE L8FB9
-        BEQ L8F9A
-L8FC6   CMP #$83 
-        BNE L8F51
-L8FCA   JSR LDE3B				; LDA ($7A),Y with module off
-        BEQ L8F51
-        INC $7A
-        BNE L8FD5
-        INC $7B
-L8FD5   INC $0114
-        CMP #$3A 
-        BEQ L8FB7
-        CMP #$22 
-        BNE L8FCA
-L8FE0   JSR LDE3B				; LDA ($7A),Y with module off
-        BNE L8FEA
-        INC $0113
-        BNE L8FCA
-L8FEA   INC $7A
-        BNE L8FF0
-        INC $7B
-L8FF0   INC $0114
-        CMP #$22 
-        BNE L8FE0
-        BEQ L8FCA
-L8FF9   LDY #$02 
-        JSR LDE3B				; LDA ($7A),Y with module off
-        BNE L9003
-        PLA
-        PLA
-        RTS
---------------------------------- 
-L9003   INY
-        JSR LDE3B				; LDA ($7A),Y with module off
-        STA $39
-        INY
-        JSR LDE3B				; LDA ($7A),Y with module off
-        STA $3A
-        JMP $A8FB
---------------------------------- 
-L9012   CMP #$CB                                ; go
-        BNE L901C
-        JSR LDE60				; next CHRGET with module off
-        CMP #$A4                                ; to
-        RTS
---------------------------------- 
-L901C   CMP #$A7                                ; then
-        BEQ L902A
-        CMP #$89                                ; goto
-        BEQ L902A
-        CMP #$8D                                ; gosub
-        BEQ L902A
-        CMP #$8A                                ; run
-L902A   RTS
---------------------------------- 
-L902B   LDA #<L9D63
-        LDY #>L9D63 				; undef'd statement error
-        STY $0112
-        JSR STROUT
-        JSR $BDC2
-        JMP CRDO
---------------------------------- 
-L903B   LDX $7A
-        STX $3D
-        LDX $7B
-        STX $3E
-        RTS
---------------------------------- 
-L9044   CMP #$22 				; '"'
-        BNE L9061
-        LDY #$00 
-        INC $7A
-        BNE L9050
-        INC $7B
-L9050   JSR LDE3B				; LDA ($7A),Y with module off
-        BEQ L906C				; end of BASIC line?
-        INC $7A					; skip string character
-        BNE L905B
-        INC $7B
-L905B   CMP #$22 				; skip until '"'
-        BNE L9050
-        BEQ L906C
-L9061   CMP #$8F 				; REM token
-        BNE L9071
-        LDA #$3B 
-        LDY #$A9 				; $a93b perform REM
-        JSR LDE09                               ; set $55/$56 and JSR ($55) with module off
-L906C   JSR LDE66				; CHRGOT with module off
-        CLC
-        RTS
---------------------------------- 
-L9071   CMP #$83 				; DATA token
-        BNE L907F
-        LDA #$F8 
-        LDY #$A8 				; $a8f8 perform DATA
-        JSR LDE09                               ; set $55/$56 and JSR ($55) with module off
-        JMP L906C
---------------------------------- 
-L907F   SEC
-        RTS
---------------------------------- 
-L9081   LDA $45
-        STA $7A
-        LDX $46
-        STX $7B
-        LDA $3E
-        STA $23
-        LDA $2D
-        STA $22
-        LDA $46
-        STA $25
-        LDA $45
-        SEC
-        SBC $3D
-        CLC
-        ADC $2D
-        STA $2D
-        STA $24
-        LDA $2E
-        ADC #$FF 
-        STA $2E
-        SBC $46
-        TAX
-        LDA $45
-        SEC
-        SBC $2D
-        TAY
-        BCS L90B5
-        INX
-        DEC $25
-L90B5   CLC
-        ADC $22
-        BCC L90BC
-        DEC $23
-L90BC   JMP $DEB0				; copy ($22) to ($24) X pages upwards with module off
---------------------------------- 
-L90BF   LDY #$6B 
-        STY $55
-        LDY #$A9 				; $A96B get fixed-point number into temporary integer
-        JSR LDE0B				; JMP $A96B with module off
-L90C8   LDA $2B
-        LDX $2C
-L90CC   LDY #$01 
-        STA $5F
-        STX $60
-        JSR LDE00				; LDA ($5F),Y with module off
-        BEQ L90F7
-        LDY #$03 
-        JSR LDE00				; LDA ($5F),Y with module off
-        CMP $15
-        BNE L90E6
-        DEY
-        JSR LDE00				; LDA ($5F),Y with module off
-        CMP $14
-L90E6   BCC L90EB
-        BNE L90F7
-        RTS
---------------------------------- 
-L90EB   LDY #$00 
-        JSR LDE00				; LDA ($5F),Y with module off
-        CMP $5F
-        BCS L90CC
-        INX
-        BCC L90CC
-L90F7   CLC
-        RTS
---------------------------------- 
-L90F9   LDA $7B
-        STA $46
-        LDX $7A
-        BNE L9103
-        DEC $46
-L9103   DEX
-        STX $45
-        RTS
-; - $9107  basic command RENEW -----------------
-RENEW:  LDA $2B
-        LDX $2C
-        STA $5F
-        STX $60
-L910F   LDY #$03 
-L9111   INY
-        BEQ L9156
-        JSR LDE00				; LDA ($5F),Y with module off
-        BNE L9111
-        TYA
-        SEC
-        ADC $5F
-        TAX
-        LDY #$00 
-        TYA
-        ADC $60
-        CMP $38
-        BNE L9129
-        CPX $37
-L9129   BCS L9156
-        PHA
-        TXA
-        STA ($5F),Y
-        INY
-        PLA
-        STA ($5F),Y
-        STX $5F
-        STA $60
-        JSR LDE00				; LDA ($5F),Y with module off
-        BNE L910F
-        DEY
-        JSR LDE00				; LDA ($5F),Y with module off
-        BNE L910F
-L9142   CLC
-        LDA $5F
-        LDY $60
-        ADC #$02 
-        BCC L914C
-        INY
-L914C   STA $2D
-        STY $2E
-        JSR CLEARC
-        JMP L848B				; check cartridge and warm start
---------------------------------- 
-L9156   TYA
-        STA ($5F),Y
-        INY
-        STA ($5F),Y
-        BNE L9142
+        jsr     GETIN
+        ldx     #$02
+        cmp     #$2f                            ; "/" modify data
+        beq     L8B8C
+        dex
+        dex
+        cmp     #$2b                            ; "+" modify address
+        beq     L8B8C
+        cmp     #$5d                            ; "]" output to screen
+        beq     L8BC1
+        cmp     #$3e                            ; ">" computer memory
+        beq     L8BAE
+        dex
+        cmp     #$3c                            ; "<" floppy memory
+        bne     L8BB4
+L8BAE   stx     $0133
+        jsr     L8CAA
+L8BB4   cmp     #$2a                            ; "*" run
+        bne     L8BBD
+        jsr     L8D29
+        lda     #$00
+L8BBD   cmp     #$5b                            ; "[" output to printer
+        bne     L8BC6
+L8BC1   stx     $0134
+        beq     L8B8F
+L8BC6   cmp     #$0d                            ; "RETURN" inc address
+        bne     L8BCD
+        jsr     L8C9B
+L8BCD   cmp     #$5e                            ; "^" dec address"
+        bne     L8BDC
+        ldx     $fb
+        bne     L8BD7
+        dec     $fc
+L8BD7   dec     $fb
+        jsr     L8CAA
+L8BDC   cmp     #$20                            ; " " dissasemble continous
+        bne     L8BE3
+        jsr     L8D36
+L8BE3   cmp     #$2d                            ; "-" dissasemble 1 line
+        bne     L8BEA
+        jsr     L8D65
+L8BEA   cmp     #$40                            ; "@" transfer
+        bne     L8BF3
+        jsr     L8C2D
+        lda     #$00
+L8BF3   cmp     #$3d                            ; "=" exit monitor
+        bne     L8BFA
+        jmp     READY                           ; go handle error message
+---------------------------------
+L8BFA   jsr     $007c
+        jsr     L88D1
+        bcs     L8C2A
+        ldx     $0135
+L8C05   rol
+        rol     $fb,x
+        rol     $fc,x
+        dey
+        bne     L8C05
+        txa
+        beq     L8C1A
+        ldx     $0133
+        beq     L8C26
+        ldx     #$57
+        jsr     L8CD7
+L8C1A   ldx     $0133
+        beq     L8C2A
+        ldx     #$52
+        jsr     L8CD7
+        beq     L8C2A
+L8C26   lda     $fd
+        sta     ($fb),y
+L8C2A   jmp     L8B8F
+---------------------------------
+L8C2D   ldx     $fb
+        stx     $26
+        lda     $fc
+        sta     $27
+        cmp     $23
+        bne     L8C3B
+        cpx     $22
+L8C3B   bcc     L8C7B
+        beq     L8C7B
+        lda     $24
+        sec
+        sbc     $22
+        tax
+        lda     $25
+        sbc     $23
+        tay
+        txa
+        clc
+        adc     $26
+        sta     $26
+        tya
+        adc     $27
+        sta     $27
+L8C55   lda     $24
+        bne     L8C5B
+        dec     $25
+L8C5B   dec     $24
+        lda     $26
+        bne     L8C63
+        dec     $27
+L8C63   dec     $26
+        lda     $25
+        cmp     $23
+        bne     L8C6F
+        lda     $24
+        cmp     $22
+L8C6F   bcc     L8C7A
+        ldy     #$00
+        lda     ($24),y
+        sta     ($26),y
+        tya
+        beq     L8C55
+L8C7A   rts
+---------------------------------
+L8C7B   lda     $23
+        cmp     $25
+        bne     L8C85
+        lda     $22
+        cmp     $24
+L8C85   bcs     L8C7A
+        ldy     #$00
+        lda     ($22),y
+        sta     ($26),y
+        inc     $22
+        bne     L8C93
+        inc     $23
+L8C93   inc     $26
+        bne     L8C7B
+        inc     $27
+        bne     L8C7B
+L8C9B   jsr     CRDO
+L8C9E   inc     $fb
+        bne     L8CA4
+        inc     $fc
+L8CA4   ldy     #$00
+        lda     ($fb),y
+        sta     $fd
+L8CAA   lda     $0133
+        beq     L8CB4
+        ldx     #$52
+        jsr     L8CD7
+L8CB4   rts
+---------------------------------
+L8CB5   ldy     #$00
+        sty     $d3
+        ldx     $0133
+        bne     L8CC2
+        lda     ($fb),y
+        sta     $fd
+L8CC2   lda     $fc
+        jsr     HEXOUT
+        lda     $fb
+        jsr     HEXOUT
+        jsr     L88C9
+        lda     $fd
+        jsr     HEXOUT
+        jmp     L88CC
+---------------------------------
+L8CD7   lda     IONO
+        sta     $ba
+        jsr     LISTN
+        lda     #$6f
+        sta     $b9
+        jsr     SECND
+        lda     #$4d
+        jsr     CIOUT
+        lda     #$2d
+        jsr     CIOUT
+        txa
+        jsr     CIOUT
+        lda     $fb
+        jsr     CIOUT
+        lda     $fc
+        jsr     CIOUT
+        cpx     #$57
+        bne     L8D0C
+        lda     #$01
+        jsr     CIOUT
+        lda     $fd
+        jsr     CIOUT
+L8D0C   jsr     UNLSN
+        cpx     #$52
+        bne     L8D26
+        lda     IONO
+        jsr     TALK
+        lda     $b9
+        jsr     TKSA
+        jsr     IECIN
+        sta     $fd
+        jsr     UNTALK
+L8D26   lda     #$00
+        rts    
+---------------------------------
+L8D29   ldx     $0133
+        beq     L8D33
+        ldx     #$45
+        jmp     L8CD7
+---------------------------------
+L8D33   jmp     ($00fb)
+---------------------------------
+L8D36   jsr     STOPT
+        bne     L8D3C
+        rts
+---------------------------------
+L8D3C   lda     $028e
+        cmp     #$01
+        beq     L8D36
+        jsr     L8D65
+        jmp     L8D36
+---------------------------------
+L8D49   jsr     CLRCHN
+        jsr     L8C9E
+L8D4F   bit     $0134
+        bpl     L8D64
+        lda     #$04
+        sta     $9a
+        sta     $ba
+        jsr     LISTN
+        lda     #$ff
+        sta     $b9
+        jmp     SCATN
+---------------------------------
+L8D64  rts
+---------------------------------
+L8D65   jsr     L8D4F
+        jsr     L8CB5
+        lda     $fd
+        tay
+        lsr
+        bcc     L8D7C
+        lsr
+        bcs     L8D8B
+        cmp     #$22
+        beq     L8D8B
+        and     #$07
+        ora     #$80
+L8D7C   lsr
+        tax
+        lda     L8E6A,X
+        bcs     L8D87
+        lsr
+        lsr
+        lsr
+        lsr   
+L8D87   and     #$0f
+        bne     L8D8F
+L8D8B   lda     #$00
+        ldy     #$80
+L8D8F   tax
+        lda     L8EAE,X
+        sta     $0113
+        and     #$03
+        sta     $0112
+        tya
+        and     #$8f
+        tax
+        tya
+        ldy     #$03
+        cpx     #$8a
+        beq     L8DB1
+L8DA6   lsr
+        bcc     L8DB1
+        lsr
+L8DAA   lsr
+        ora     #$20
+        dey
+        bne     L8DAA
+        iny
+L8DB1   tax
+        dey
+        bne     L8DA6
+        lda     L8EC8,X
+        sta     $0110
+        lda     L8F08,X
+        sta     $0111
+        ldx     #$00
+L8DC3   stx     $0114
+        cpx     $0112
+        bcc     L8DD0
+        jsr     L88C9
+        bne     L8DDD
+L8DD0   jsr     L8D49
+        lda     $fd
+        ldx     $0114
+        sta     $fe,x
+        jsr     HEXOUT
+L8DDD   jsr     L88CC
+        ldx     $0114
+        inx
+        cpx     #$03
+        bne     L8DC3
+L8DE8   lda     #$00
+        ldy     #$05
+L8DEC   asl     $0111
+        rol     $0110
+        rol
+        dey
+        bne     L8DEC
+        ora     #$40
+        cmp     #$40
+        bne     L8DFE
+        lda     #$2a
+L8DFE   jsr     CHROUT
+        dex
+        bne     L8DE8
+        jsr     L88C9
+        ldx     #$06
+L8E09   cpx     #$04
+        bne     L8E30
+        lda     $0111
+        bne     L8E15
+        jsr     L88CC
+L8E15   ldy     $0112
+        beq     L8E30
+        lda     $0113
+        cmp     #$84
+        bcs     L8E52
+L8E21   lda     $00fd,y
+        stx     $0114
+        jsr     HEXOUT
+        ldx     $0114
+        dey
+        bne     L8E21
+L8E30   asl     $0113
+        bcc     L8E46
+        inc     $0111
+        lda     L8EBB,X
+        jsr     CHROUT
+        lda     L8EC1,X
+        beq     L8E46
+        jsr     CHROUT
+L8E46   dex
+        bne     L8E09
+L8E49   jsr     CRDO
+        jsr     L8D49
+        jmp     CLRCHN
+---------------------------------
+L8E52   ldx     $fc
+        lda     $fe
+        bpl     L8E59
+        dex
+L8E59   adc     $fb
+        bcc     L8E5E
+        inx  
+L8E5E   tay
+        txa
+        jsr     HEXOUT
+        tya
+        jsr     HEXOUT
+        jmp     L8E49
+---------------------------------
+L8E6A:  !by     $40,$02,$45,$03,$d0,$08,$40,$09 ; @.e.P.@.
+        !by     $30,$22,$45,$33,$d0,$08,$40,$09 ; 0"e3P.@.
+        !by     $40,$02,$45,$33,$d0,$08,$40,$09 ; @.e3P.@.
+        !by     $40,$02,$45,$b3,$d0,$08,$40,$09 ; @.e.P.@.
+        !by     $00,$22,$44,$33,$d0,$8c,$44,$00 ; ."d3P.d.
+        !by     $11,$22,$44,$33,$d0,$8c,$44,$9a ; ."d3P.d.
+        !by     $10,$22,$44,$33,$d0,$08,$40,$09 ; ."d3P.@.
+        !by     $10,$22,$44,$33,$d0,$08,$40,$09 ; ."d3P.@.
+        !by     $62,$13,$78,$a9 
+L8EAE:  !by     $00,$41,$01,$02,$00,$20,$99,$8d
+        !by     $11,$12,$06,$8a,$05
+L8EBB:  !by     $21,$2c,$29,$2c,$41,$23
+L8EC1:  !by     $28,$59,$00,$58,$00,$00,$00 
+L8EC8:  !by     $14,$82,$14,$1b,$54,$83,$13,$99
+        !by     $95,$82,$15,$1b,$95,$83,$15,$99
+        !by     $00,$21,$10,$a6,$61,$a0,$10,$1b
+        !by     $1c,$4b,$13,$1b,$1c,$4b,$11,$99
+        !by     $00,$12,$53,$53,$9d,$61,$1c,$1c
+        !by     $a6,$a6,$a0,$a4,$21,$00,$73,$00
+        !by     $0c,$93,$64,$93,$9d,$61,$21,$4b
+        !by     $7c,$0b,$2b,$09,$9d,$61,$1b,$98
+
+L8F08:  !by     $96,$20,$18,$06,$e4,$20,$52,$46
+        !by     $12,$02,$86,$12,$26,$02,$a6,$52
+        !by     $00,$72,$c6,$42,$32,$72,$e6,$2c
+        !by     $32,$b2,$8a,$08,$30,$b0,$62,$48
+        !by     $00,$68,$60,$60,$32,$32,$32,$30
+        !by     $02,$26,$70,$f0,$70,$00,$e0,$00
+        !by     $d8,$d8,$e4,$e4,$30,$30,$46,$86
+        !by     $82,$88,$e4,$06,$02,$02,$60,$86   
+
+; - $8F48  module information message ---------- 
+SCNMSG: !by     $0d,$0d,$2a,$50,$52,$49,$4e,$54 ; ..*print   
+        !by     $2d,$54,$45,$43,$48,$4e,$49,$4b ; -technik
+        !by     $2d,$48,$45,$4c,$50,$20,$50,$4c ; -help pl
+        !by     $55,$53,$2a,$20,$0d,$00         ; us* .
+; - $8F66  overwrite message text --------------
+OVWTXT: !by     $0d,$4f,$56,$45,$52,$57,$52,$49 ; .overwri
+        !by     $54,$45,$3f,$20,$12,$4a,$92,$41 ; te? .j.a
+        !by     $2f,$12,$4e,$92,$45,$49,$4e,$0d ; /.n.ein.
+        !by     $00 
+; - $8F7F  DOS and monitor commands char -------
+DMCHAR: !by     $3e,$40,$3c,$2f,$5e,$24,$5d,$23 ; >@</^$]#
+        !by     $21,$5f,$2a,$2b,$2d,$28,$29,$25 ; !_*+-()%
+        !by     $5c,$5b ; £[
+; - $8F91  commands low byte -------------------
+DMLBYT: !by     <RDCH15,<RDDCH,<VERIFY,<LDREL,<LDRUN,<LDDIR,<MONI,<BASCMD
+        !by     <CONVERT,<SAVEPRG,<PRTFRE,<UPCASE,<LOWCASE,<OPNFILE,<CLFILE,<LDABS
+        !by     <SETIONO,<ASSEMBLER
+; - $8FA3  commands high byte ------------------
+DMHBYT: !by     >RDCH15,>RDDCH,>VERIFY,>LDREL,>LDRUN,>LDDIR,>MONI,>BASCMD
+        !by     >CONVERT,>SAVEPRG,>PRTFRE,>UPCASE,>LOWCASE,>OPNFILE,>CLFILE,>LDABS
+        !by     >SETIONO,>ASSEMBLER
+; - #8FB5  basic commands char -----------------
+BCCHAR: !by     $41,$44,$45,$46,$47,$48,$4b,$4c ; adefghkl
+        !by     $4d,$52,$53,$54,$56,$55,$43,$42 ; mrstvucb
+; - #8FC5  basic commands low byte -------------
+BCLBYT: !by     <APPEND,<DELETE,<ENDTRACE,<FIND,<GENLINE,<HELP,<KILL,<LPAGE
+        !by     <M_DUMP,<RENUMBER,<S_STEP,<TRACE,<V_DUMP,<UNDEF,<COMPACTOR,<RENEW
+; - $8FD5  basic commands high byte ------------
+BCHBYT: !by     >APPEND,>DELETE,>ENDTRACE,>FIND,>GENLINE,>HELP,>KILL,>LPAGE
+        !by     >M_DUMP,>RENUMBER,>S_STEP,>TRACE,>V_DUMP,>UNDEF,>COMPACTOR,>RENEW
+
+FILL2   !fi     $9000-FILL2, $aa
+
 ; ----------------------------------------------
-; - $915E - Start of assembler -----------------
+; - $9000 - Start of assembler -----------------
 ; ----------------------------------------------
 ASSEMBLER:
-        LDA #$00 
-        STA $2D
-        LDA #$A0 
-        STA $2E
-        LDX #$47 
-L9168   LDA L9BCE,X                             ; copy part of assembler to RAM
-        STA $0347,X
-        DEX
-        BPL L9168
-        LDA #<L9C15 
-        LDY #>L9C15				; "programname  :"
-        JSR STROUT
-        LDX #$00 
-L917A   JSR CHRIN
-        CMP #$0D 
-        BEQ L9189
-        STA $0120,X
-        INX
-        CPX #$10 
-        BCC L917A
-L9189   STX $B7
-        TXA
-        BNE L9191
-        JMP L848B				; check cartridge and warm start
---------------------------------- 
-L9191   LDA #<L9C26 
-        LDY #>L9C26 				; "printout mode:"
-        JSR STROUT
-        LDX #$00 
-        STX $57
-        STX $58
-        STX $59
-        STX $5A
-L91A2   JSR CHRIN
-        CMP #$0D 
-        BEQ L91B4
-        CPX #$03 
-        BCS L91A2
-        AND #$01 
-        STA $57,X
-        INX
-        BNE L91A2
-L91B4   JSR CRDO
-        LDX #$00 
-        STX $3E
-        STX $3F
-        STX $40
-        STX $2F
-        STX $30
-L91C3   STX $2A
-        LDX #$00 
-        STX $7A
-        STX $29
-        STX $43
-        STX $44
-        STX $31
-        STX $32
-        LDX #$10 
-        STX $7B
-        LDA #$01 
-        STA $BC
-        LDA #$20 
-        STA $BB
-        JSR L9A9E
-        LDX $3F
-        BNE L91E9
-        JSR L944B
-L91E9   JSR L99BD
-        JSR L948C
-        LDA $2A
-        BEQ L91FA
-        LDA $58
-        BEQ L91FA
-        JSR L93A3
-L91FA   LDA $4D
-        BMI L9207
-        CLC
-        ADC $7A
-        STA $7A
-        BCC L9207
-        INC $7B
-L9207   INC $31
-        BNE L920D
-        INC $32
-L920D   LDA $29
-        BEQ L91E9
-        LDA $0131
-        STA $BA
-        JSR $F648
-        LDX $2A
-        BNE L9220
-        INX
-        BNE L91C3
-L9220   JSR L9422
-L9223   LDA #<L9C37 
-        LDY #>L9C37 				; "   lines:"
-        JSR STROUT
-        LDA $32
-        LDX $31
-        JSR INTOUT
-        LDA #<L9C3E 
-        LDY #>L9C3E 				; "   symbols:"
-        JSR STROUT
-        LDA $30
-        LDX $2F
-        JSR INTOUT
-        LDA #<L9C4A
-        LDY #>L9C4A 				; "   errors:"
-        JSR STROUT
-        LDA #$00 
-        LDX $40
-        JSR INTOUT
-        JSR L9425
-        BCS L9223
-        JSR L9422
-        LDA $59
-        BEQ L928D
-        JSR L9314
-        LDY #$05 
-        LDA #$00 
-L9260   STA $0110,Y
-        DEY
-        BPL L9260
-L9266   LDY #$05 
-        LDA #$FF 
-L926A   STA $0100,Y
-        DEY
-        BPL L926A
-        LDX #$00 
-        LDA #$A0 
-L9274   STX $22
-        STA $23
-        CMP $2E
-        BNE L927E
-        CPX $2D
-L927E   BCC L9296
-        LDA $0100
-        BPL L9290
-        JSR L9302
-L9288   JSR L9425
-        BCS L9288
-L928D   JMP L848B				; check cartridge and warm start
---------------------------------- 
-L9290   JSR L92D2
-        JMP L9266
---------------------------------- 
-L9296   LDY #$00 
-L9298   JSR $0373
-        CMP $0110,Y
-        BNE L92A7
-        INY
-        CPY #$06 
-        BNE L9298
-        BEQ L92C5
-L92A7   BCC L92C5
-        LDY #$00 
-L92AB   JSR $0373
-        CMP $0100,Y
-        BNE L92B8
-        INY
-        CPY #$06 
-        BNE L92AB
-L92B8   BCS L92C5
-        LDY #$07 
-L92BC   JSR $0373
-        STA $0100,Y
-        DEY
-        BPL L92BC
-L92C5   LDA $22
-        CLC
-        ADC #$08 
-        TAX
-        LDA $23
-        ADC #$00 
-        JMP L9274
---------------------------------- 
-L92D2   LDX $28
-        LDY #$00 
-L92D6   LDA $0100,Y
-        STA $0110,Y
-        STA $0200,X
-        INX
-        INY
-        CPY #$06 
-        BNE L92D6
-        LDA #$3D 
-        STA $0200,X
-        INX
-        LDA $0106
-        JSR L9322
-        LDA $0107
-        JSR L9322
-        INX
-        INX
-        CPX #$27 
-        BNE L92FE
-        INX
-L92FE   CPX #$48 
-        BCC L931F
-L9302   LDX #$00 
-L9304   LDA $0200,X
-        JSR CHROUT
-        INX
-        CPX #$4F 
-        BNE L9304
-        JSR L9425
-        BCS L9302
-L9314   LDA #$20 
-        LDX #$4F 
-L9318   STA $0200,X
-        DEX
-        BPL L9318
-        INX
-L931F   STX $28
-        RTS
---------------------------------- 
-L9322   PHA
-        LSR
-        LSR
-        LSR
-        LSR
-        JSR L932D
-        PLA
-        AND #$0F 
-L932D   ORA #$30 
-        CMP #$3A 
-        BCC L9335
-        ADC #$06 
-L9335   STA $0200,X
-        INX
-        RTS
---------------------------------- 
-L933A   LDY $46
-        INC $46
-        LDA $0140,Y
-        BNE L9348
-L9343   LDA #$00 
-        STY $46
-        RTS
---------------------------------- 
-L9348   CMP #$3B 
-        BEQ L9343
-        RTS
---------------------------------- 
-L934D   LDY $46
-        INC $46
-        LDA $0140,Y
-        BEQ L9343
-        RTS
---------------------------------- 
-L9357   CPX #$01 
-        BNE L9364
-L935B   LDA $63
-        LDY $62
-L935F   STA $69
-        STY $68
-        RTS
---------------------------------- 
-L9364   CPX #$2A 
-        BNE L936F
-        LDA $7A
-        LDY $7B
-        JMP L935F
---------------------------------- 
-L936F   CPX #$03 
-        BEQ L9376
-        JMP L9619
---------------------------------- 
-L9376   LDA $49
-        AND $48
-        STA $49
-        LDA $48
-        BNE L938B
-        LDA $2A
-        BEQ L935B
-        LDY #$9B 
-        LDA #$9B 
-        JMP L9628
---------------------------------- 
-L938B   LDY #$06 
-        JSR $0373
-        STA $68
-        INY
-        JSR $0373
-        STA $69
-L9398   RTS
---------------------------------- 
-L9399   LDA $0139,Y
-        CMP #$20 
-        BNE L9398
-        INY
-        BNE L9399
-L93A3   LDY $7A
-        LDA $7B
-        LDX $4D
-        BPL L93B3
-        LDX #$00 
-        STX $4D
-        LDY $67
-        LDA $66
-L93B3   STY $FB
-        STA $FC
-L93B7   JSR L9B24
-        JSR L8857
-        LDY #$00 
-L93BF   CPY $4D
-        BCS L93CC
-        LDA $004E,Y
-        JSR L9B2B
-        JMP L93CF
---------------------------------- 
-L93CC   JSR L8854
-L93CF   JSR L8857
-        INY
-        CPY #$03 
-        BCC L93BF
-        LDY #$00 
-L93D9   LDA $0139,Y
-        JSR CHROUT
-        INY
-        CPY #$07 
-        BNE L93D9
-        LDX $27
-        BEQ L9401
-        JSR L9399
-        LDX #$00 
-L93ED   LDA $0139,Y
-        CMP #$20 
-        BEQ L9401
-        CMP #$3D 
-        BEQ L9401
-        JSR CHROUT
-        INY
-        INX
-        CPX #$06 
-        BNE L93ED
-L9401   LDA #$20 
-        JSR CHROUT
-        INX
-        CPX #$07 
-        BNE L9401
-        JSR L9399
-L940E   LDA $0139,Y
-        BEQ L9419
-        JSR CHROUT
-        INY
-        BNE L940E
-L9419   JSR L9425
-        BCS L941F
-        RTS
---------------------------------- 
-L941F   JMP L93B7
---------------------------------- 
-L9422   JSR L9425
-L9425   JSR CRDO
-L9428   LDA #$04 
-        CMP $9A
-        BEQ L943E
-        STA $9A
-        STA $BA
-        JSR LISTN
-        LDA #$FF 
-        STA $B9
-        JSR SCATN
-        SEC
-        RTS
---------------------------------- 
-L943E   LDX #$03 
-        STX $9A
-        JSR UNLSN
-        DEC $3D
-        BEQ L944B
-        CLC
-        RTS
---------------------------------- 
-L944B   JSR L9428
-        LDX $3F
-L9450   JSR CRDO
-        DEX
-        BPL L9450
-        LDX #$05 
-        STX $3F
-        LDX #$41 
-        STX $3D
-        INC $3E
-        LDX #$00 
-L9462   LDA $0120,X
-L9465   JSR CHROUT
-        INX
-        CPX $B7
-        BCC L9462
-        LDA #$20 
-        CPX #$3C 
-        BCC L9465
-        LDA #<L9C55 
-        LDY #>L9C55				; "page:"
-        JSR STROUT
-        LDA #$00 
-        STA $68
-        LDX $3E
-        JSR INTOUT
-        JSR CRDO
-        JSR CRDO
-        JMP L943E
---------------------------------- 
-L948C   LDY #$00 
-        STY $27
-        STY $46
-        STY $4D
-        JSR L966A
-        TXA
-        BEQ L94EF
-        CPX #$03 
-        BNE L94FB
-        INC $27
-        LDY $2A
-        BNE L94C0
-        INC $2F
-        BNE L94AA
-        INC $30
-L94AA   LDY #$05 
-L94AC   LDA $0110,Y
-        JSR $0382
-        DEY
-        BPL L94AC
-        LDA $48
-        BEQ L94C0
-        LDY #$9B 
-        LDA #$8A 
-        JSR L9628
-L94C0   JSR L966A
-        CPX #$3D 
-        BNE L94F0
-        LDA #$FF 
-        STA $4D
-        JSR L979C
-        LDA $6B
-        LDX $6A
-L94D2   STA $67
-        STX $66
-        LDY $2A
-        BNE L94EF
-        LDY #$07 
-        JSR $0382
-        TXA
-        DEY
-        JSR $0382
-        LDA $2D
-        CLC
-        ADC #$08 
-        STA $2D
-        BCC L94EF
-        INC $2E
-L94EF   RTS
---------------------------------- 
-L94F0   STX $28
-        LDA $7A
-        LDX $7B
-        JSR L94D2
-        LDX $28
-L94FB   CPX #$02 
-        BNE L9502
-        JMP L9815
---------------------------------- 
-L9502   CPX #$2A 
-        BNE L951C
-        JSR L966A
-        CPX #$3D 
-        BEQ L9510
-L950D   JMP L9619
---------------------------------- 
-L9510   JSR L979C
-        LDA $6B
-        STA $7A
-        LDA $6A
-        STA $7B
-        RTS
---------------------------------- 
-L951C   CPX #$2E 
-        BNE L950D
-        LDY $46
-        LDX #$00 
-L9524   LDA L9BB3,X                             ; 'end'
-        CMP $0140,Y
-        BNE L9535
-        INY
-        INX
-        CPX #$03 
-        BNE L9524
-        INC $29
-        RTS
---------------------------------- 
-L9535   LDA L9BB6,X                             ; 'text'
-        CMP $0140,Y
-        BNE L956E
-        INY
-        INX
-        CPX #$04 
-        BNE L9535
-        LDA #$FF 
-L9545   STA $28
-        STY $46
-L9549   JSR L933A
-        BNE L9551
-L954E   JMP L9619
---------------------------------- 
-L9551   CMP #$27 
-        BEQ L9559
-        CMP #$22 
-        BNE L9549
-L9559   STA $07
-L955B   JSR L934D
-        BEQ L954E
-        CMP $07
-        BEQ L956B
-        AND $28
-        JSR L9601
-        BNE L955B
-L956B   JMP L9612
---------------------------------- 
-L956E   LDA L9BBE,X                             ; 'disp'
-        CMP $0140,Y
-        BNE L9580
-        INY
-        INX
-        CPX #$04 
-        BNE L956E
-        LDA #$3F 
-        BNE L9545
-L9580   LDA $0140,Y
-        CMP L9BBA,X                             ; 'wort'
-        BNE L9592
-L9588   INY
-        INX
-        CPX #$04 
-        BNE L9580
-        LDA #$00 
-        BEQ L95AA
-L9592   CPX #$03 
-        BNE L959A
-        CMP #$44 
-        BEQ L9588
-L959A   LDA L9BC2,X                             ; 'byte'
-        CMP $0140,Y
-        BNE L95C3
-        INY
-        INX
-        CPX #$04 
-        BNE L959A
-        LDA #$FF 
-L95AA   STA $28
-        STY $46
-L95AE   JSR L979C
-        LDA $6B
-        JSR L9601
-        BIT $28
-        BPL L95D4
-        JSR L961F
-L95BD   CPX #$2C 
-        BEQ L95AE
-        BNE L9612
-L95C3   LDA L9BC6,X                             ; 'load'
-        CMP $0140,Y
-        BNE L95DB
-        INY
-        INX
-        CPX #$04 
-        BNE L95C3
-        JMP L9A87
---------------------------------- 
-L95D4   LDA $6A
-        JSR L9601
-        BNE L95BD
-L95DB   LDA L9BCA,X                             ; 'corr'
-        CMP $0140,Y
-        BNE L95FB
-        INY
-        INX
-        CPX #$04 
-        BNE L95DB
-        STY $46
-        JSR L979C
-        LDA $6B
-        LDY $6A
-        STA $43
-        STY $44
-L95F6   PLA
-        PLA
-        JMP L91E9
---------------------------------- 
-L95FB   LDA #$76 
-        LDY #$9B 
-        BNE L9628
-L9601   PHA
-        PLA
-        LDY $4D
-        JSR L998F
-        CPY #$03 
-        BCS L960F
-        STA $004E,Y
-L960F   INC $4D
-        RTS
---------------------------------- 
-L9612   JSR L966A
-        TXA
-        BNE L9619
-        RTS
---------------------------------- 
-L9619   LDA #$41 
-        LDY #$9B 
-        BNE L9628
-L961F   LDA $6A
-        BNE L9624
-        RTS
---------------------------------- 
-L9624   LDA #$48 
-        LDY #$9B 
-L9628   STY $63
-        STA $62
-        STX $28
-        CMP #$8A 
-        BEQ L9636
-        LDA $2A
-        BEQ L9667
-L9636   INC $40
-        LDA $57
-        BEQ L9667
-L963C   LDY #$00 
-L963E   LDA $0139,Y
-        JSR CHROUT
-        INY
-        CPY #$07 
-        BNE L963E
-        LDY #$00 
-L964B   LDA ($62),Y
-        BEQ L9655
-        JSR CHROUT
-        INY
-        BNE L964B
-L9655   LDY #$00 
-L9657   LDA L9BAC,Y                             ; 'error'
-        BEQ L9662
-        JSR CHROUT
-        INY
-        BNE L9657
-L9662   JSR L9425
-        BCS L963C
-L9667   LDX $28
-        RTS
---------------------------------- 
-L966A   LDX #$00 
-        STX $62
-        STX $63
-        JSR L933A
-        BNE L9676
-        RTS
---------------------------------- 
-L9676   CMP #$20 
-        BEQ L966A
-        INX
-        CMP #$27 
-        BNE L9685
-L967F   JSR L934D
-        STA $63
-        RTS
---------------------------------- 
-L9685   CMP #$22 
-        BEQ L967F
-        CMP #$24 
-        BNE L96B7
-L968D   JSR L933A
-        BEQ L96B6
-        CMP #$30 
-        BCC L96B4
-        CMP #$3A 
-        BCC L96A4
-        CMP #$41 
-        BCC L96B4
-        CMP #$47 
-        BCS L96B4
-        SBC #$06 
-L96A4   ASL
-        ASL
-        ASL
-        ASL
-        LDY #$04 
-L96AA   ASL
-        ROL $63
-        ROL $62
-        DEY
-        BNE L96AA
-        BEQ L968D
-L96B4   DEC $46
-L96B6   RTS
---------------------------------- 
-L96B7   CMP #$40 
-        BNE L96D9
-L96BB   JSR L933A
-        BEQ L96B6
-        CMP #$30 
-        BCC L96B4
-        CMP #$38 
-        BCS L96B4
-        ASL
-        ASL
-        ASL
-        ASL
-        ASL
-        LDY #$03 
-L96CF   ASL
-        ROL $63
-        ROL $62
-        DEY
-        BNE L96CF
-        BEQ L96BB
-L96D9   CMP #$25 
-        BNE L96F2
-L96DD   JSR L933A
-        BEQ L96B6
-        CMP #$30 
-        BEQ L96EA
-        CMP #$31 
-        BNE L96B4
-L96EA   LSR
-        ROL $63
-        ROL $62
-        JMP L96DD
---------------------------------- 
-L96F2   CMP #$30 
-        BCC L9734
-        CMP #$3A 
-        BCS L9734
-        BCC L9709
-L96FC   JSR L933A
-        BEQ L96B6
-        CMP #$30 
-        BCC L96B4
-        CMP #$3A 
-        BCS L96B4
-L9709   AND #$0F 
-        PHA
-        LDA $63
-        LDY $62
-        ROL $63
-        ROL $62
-        ROL $63
-        ROL $62
-        CLC
-        ADC $63
-        STA $63
-        TYA
-        ADC $62
-        STA $62
-        ROL $63
-        ROL $62
-        PLA
-        ADC $63
-        STA $63
-        LDA $62
-        ADC #$00 
-        STA $62
-        JMP L96FC
---------------------------------- 
-L9734   TAX
-        CMP #$41 
-        BCS L973A
-L9739   RTS
---------------------------------- 
-L973A   CMP #$5B 
-        BCS L9739
-        LDY #$04 
-        LDA #$20 
-L9742   STA $0111,Y
-        DEY
-        BPL L9742
-        STX $0110
-        LDX #$01 
-L974D   JSR L933A
-        BEQ L976E
-        CMP #$30 
-        BCC L976C
-        CMP #$3A 
-        BCC L9762
-        CMP #$41 
-        BCC L976C
-        CMP #$5B 
-        BCS L976C
-L9762   STA $0110,X
-        INX
-        CPX #$06 
-        BCC L974D
-        BCS L976E
-L976C   DEC $46
-L976E   DEX
-        BNE L9780
-        LDX $0110
-        CPX #$41 
-        BEQ L9739
-        CPX #$59 
-        BEQ L9739
-        CPX #$58 
-        BEQ L9739
-L9780   CPX #$02 
-        BNE L978E
-        JSR L9ACF
-        BEQ L978E
-        LDX #$02 
-        STA $47
-        RTS
---------------------------------- 
-L978E   LDX #$00 
-        LDY #$00 
-        STY $48
-        LDA #$00 
-        LDY #$A0 
-        SEI
-        JMP $0347
---------------------------------- 
-L979C   JSR L966A
-        TXA
-        BNE L97A3
-        RTS
---------------------------------- 
-L97A3   LDA #$01 
-        STA $49
-        JSR L9357
-        LDA $69
-        LDY $68
-        STA $6B
-        STY $6A
-        JMP L97D8
---------------------------------- 
-L97B5   LDA $4A
-        CMP #$2B 
-        BNE L97CB
-        LDA $6B
-        CLC
-        ADC $69
-        STA $6B
-        LDA $6A
-        ADC $68
-        STA $6A
-        JMP L97D8
---------------------------------- 
-L97CB   LDA $6B
-        SEC
-        SBC $69
-        STA $6B
-        LDA $6A
-        SBC $68
-        STA $6A
-L97D8   JSR L966A
-        BEQ L97F0
-        STX $4A
-        CPX #$2B 
-        BEQ L97E7
-        CPX #$2D 
-        BNE L97F0
-L97E7   JSR L966A
-        JSR L9357
-        JMP L97B5
---------------------------------- 
-L97F0   LDY $49
-        BNE L97F9
-        STY $6B
-        INY
-        STY $6A
-L97F9   CPX #$5B 
-        BEQ L9801
-        CPX #$3E 
-        BNE L980C
-L9801   LDY $6A
-        STY $6B
-L9805   LDY #$00 
-        STY $6A
-        JMP L966A
---------------------------------- 
-L980C   CPX #$5D 
-        BEQ L9805
-        CPX #$3C 
-        BEQ L9805
-        RTS
---------------------------------- 
-L9815   LDX #$01 
-        STX $4D
-        LDY $47
-        CPY #$05 
-        BEQ L983C
-        JSR L966A
-        CPX #$41 
-        BNE L982C
-        LDA #$0A 
-        STA $4C
-        BNE L983C
-L982C   INC $4D
-        CPX #$23 
-        BNE L983F
-        LDA #$02 
-        STA $4C
-        JSR L979C
-        JSR L961F
-L983C   JMP L98B7
---------------------------------- 
-L983F   CPX #$28 
-        BNE L9885
-        JSR L979C
-        CPX #$2C 
-        BNE L9864
-        LDA #$00 
-        STA $4C
-        JSR L961F
-        JSR L966A
-        CPX #$58 
-        BEQ L985B
-L9858   JMP L98E5
---------------------------------- 
-L985B   JSR L966A
-        CPX #$29 
-        BNE L9858
-        BEQ L98B7
-L9864   LDA #$04 
-        STA $4C
-        CPX #$29 
-        BNE L9858
-        JSR L966A
-        TXA
-        BNE L9878
-        LDA #$08 
-        STA $4C
-        BNE L98B7
-L9878   CPX #$2C 
-        BNE L9858
-        JSR L966A
-        CPX #$59 
-        BNE L9858
-        BEQ L98B7
-L9885   LDA #$01 
-        STA $4C
-        JSR L97A3
-        CPX #$2C 
-        BNE L98A3
-        JSR L966A
-        LDA #$05 
-        STA $4C
-        CPX #$58 
-        BEQ L98A3
-        CPX #$59 
-        BNE L9858
-        LDA #$09 
-        STA $4C
-L98A3   LDA $6A
-        BEQ L98B7
-        INC $4C
-        INC $4C
-        INC $4D
-        LDA $4C
-        CMP #$09 
-        BCC L98B7
-        LDA #$06 
-        STA $4C
-L98B7   JSR L9612
-        LDA $6B
-        STA $4F
-        LDA $6A
-        STA $50
-        LDX $47
-        DEX
-        BNE L98F7
-        LDA $4C
-        CMP #$09 
-        BNE L98D5
-        LDA #$06 
-        STA $4C
-        LDA #$03 
-        STA $4D
-L98D5   LDA $4C
-        CMP #$08 
-        BCS L98E5
-        CMP #$02 
-        BNE L98EC
-        LDA $4B
-        CMP #$81 
-        BNE L98EC
-L98E5   LDA #$66 
-        LDY #$9B 
-        JMP L9628
---------------------------------- 
-L98EC   LDA $4C
-        ASL
-        ASL
-        ADC $4B
-        STA $4B
-        JMP L995C
---------------------------------- 
-L98F7   DEX
-        BNE L9915
-        LDA $4C
-        CMP #$09 
-        BCS L9905
-        LSR
-        BCS L98EC
-        BCC L98E5
-L9905   CMP #$0A 
-        BNE L98E5
-        LDA $4B
-        CMP #$63 
-        BCS L98E5
-        ADC #$08 
-        STA $4B
-        BNE L995C
-L9915   DEX
-        BNE L995F
-        LDA #$02 
-        STA $4D
-        LDA $6B
-        SEC
-        SBC $7A
-        STA $69
-        LDA $6A
-        SBC $7B
-        STA $68
-        LDA $69
-        SEC
-        SBC #$02 
-        STA $69
-        LDA $68
-        SBC #$00 
-        STA $68
-        BMI L9950
-        BNE L993E
-        LDA $69
-        BPL L9958
-L993E   LDA #$00 
-        STA $69
-        LDA $2A
-        BEQ L9958
-        LDA #$57 
-        LDY #$9B 
-        JSR L9628
-        JMP L9958
---------------------------------- 
-L9950   CMP #$FF 
-        BNE L993E
-        LDA $69
-        BPL L993E
-L9958   LDA $69
-        STA $4F
-L995C   JMP L997E
---------------------------------- 
-L995F   DEX
-        BNE L997E
-        LDA $4B
-        CMP #$14 
-        BEQ L996C
-        CMP #$0A 
-        BNE L9970
-L996C   LDY #$03 
-        STY $4D
-L9970   CLC
-        ADC $4C
-        TAY
-        LDA L9FA8,Y
-        BNE L997C
-        JMP L98E5
---------------------------------- 
-L997C   STA $4B
-L997E   LDA $4B
-        STA $4E
-        LDY $4D
-        DEY
-L9985   LDA $004E,Y
-        JSR L998F
-        DEY
-        BPL L9985
-        RTS
---------------------------------- 
-L998F   PHA
-        LDA $7A
-        SEC
-        SBC $43
-        STA $41
-        LDA $7B
-        SBC $44
-        STA $42
-        TYA
-        CLC
-        ADC $41
-        BCC L99A5
-        INC $42
-L99A5   STA $41
-        LDA $42
-        CMP #$08 
-        BCC L99BB
-        CMP #$A0 
-        BCS L99BB
-        PLA
-        STY $0B
-        LDY #$00 
-        STA ($41),Y
-        LDY $0B
-        RTS
---------------------------------- 
-L99BB   PLA
-        RTS
---------------------------------- 
-L99BD   LDY #$00 
-        STY $68
-        STY $90
-        JSR L9AB0
-        JSR IECIN
-        TAX
-        JSR IECIN
-        LDY $90
-        BEQ L99D5
-        LDA #$FF 
-        LDX #$FF 
-L99D5   STA $62
-        STX $63
-        LDX #$90 
-        SEC
-        JSR ADD
-        JSR FLPSTR
-        LDY #$05 
-        LDX #$FF 
-L99E6   INX
-        LDA $0100,X
-        BNE L99E6
-L99EC   DEX
-        BMI L99F2
-        LDA $0100,X
-L99F2   STA $0200,Y
-        DEY
-        BPL L99EC
-        LDY #$06 
-        STA $0200,Y
-        INY
-        LDX $90
-        BNE L9A12
-L9A02   JSR IECIN
-        LDX $90
-        BNE L9A12
-        TAX
-        BEQ L9A20
-        STA $0200,Y
-        INY
-        BNE L9A02
-L9A12   LDA #$2E 
-        STA $0200,Y
-        INY
-        LDA #$80 
-        STA $0200,Y
-        INY
-        LDA #$00 
-L9A20   STA $0200,Y
-        JSR UNTALK
-        LDY #$00 
-        STY $0C
-        STY $23
-        STY $22
-L9A2E   LDY $22
-        INC $22
-        LDA $0200,Y
-        BMI L9A50
-        CMP #$22 
-        BNE L9A43
-        LDA $0C
-        EOR #$FF 
-        STA $0C
-        LDA #$22 
-L9A43   LDY $23
-        STA $0139,Y
-        TAX
-        BNE L9A4C
-        RTS
---------------------------------- 
-L9A4C   INC $23
-        BNE L9A2E
-L9A50   CMP #$FF 
-        BEQ L9A43
-        BIT $0C
-        BMI L9A43
-        TAX
-        LDY #$9E 
-        STY $62
-        LDY #$A0 
-        STY $63
-        LDY #$00 
-        ASL
-        BEQ L9A78
-L9A66   DEX
-        BPL L9A77
-L9A69   INC $62
-        BNE L9A6F
-        INC $63
-L9A6F   LDA ($62),Y
-        BPL L9A69
-        BMI L9A66
-L9A75   INC $23
-L9A77   INY
-L9A78   LDX $23
-        LDA ($62),Y
-        PHA
-        AND #$7F 
-        STA $0139,X
-        PLA
-        BPL L9A75
-        BMI L9A4C
-L9A87   TYA
-        ADC #$40 
-        STA $BB
-        LDA #$01 
-        STA $BC
-        LDA $0131
-        STA $BA
-        JSR $F648
-        JSR L9A9E
-        JMP L95F6
---------------------------------- 
-L9A9E   LDA $0131
-        STA $BA
-        LDA #$60 
-        STA $B9
-        JSR L9AC3
-        JSR L9AB0
-        JMP UNTALK
---------------------------------- 
-L9AB0   LDA $0131
-        STA $BA
-        JSR TALK
-        LDA #$60 
-        JSR TKSA
-        JSR IECIN
-        JMP IECIN
---------------------------------- 
-L9AC3   JSR L9ACB
-        BCC L9ACE
-        JMP EREXIT
---------------------------------- 
-L9ACB   JSR $F3D5
-L9ACE   RTS
---------------------------------- 
-L9ACF   LDY #$02 
-L9AD1   LDA $0110,Y
-        STA $0024,Y
-        AND #$40 
-        BEQ L9AFD
-        DEY
-        BPL L9AD1
-        LDA $26
-        ASL
-        ASL
-        ASL
-        LDX #$03 
-L9AE5   ASL
-        ROL $25
-        DEX
-        BPL L9AE5
-        ROL $24
-        CPX #$FD 
-        BNE L9AE5
-        LDY #$37 
-L9AF3   LDA $24
-        CMP L9F00,Y
-        BEQ L9B00
-L9AFA   DEY
-        BPL L9AF3
-L9AFD   LDA #$00 
-        RTS
---------------------------------- 
-L9B00   LDA $25
-        CMP L9F38,Y
-        BNE L9AFA
-        LDA L9F70,Y
-        LDX #$05 
-        CPY #$1F 
-        BCS L9B20
-        DEX
-        CPY #$16 
-        BCS L9B20
-        DEX
-        CPY #$0E 
-        BCS L9B20
-        DEX
-        CPY #$08 
-        BCS L9B20
-        DEX
-L9B20   STA $4B
-        TXA
-        RTS
---------------------------------- 
-L9B24   LDA $FC
-        JSR L9B2B
-        LDA $FB
-L9B2B   PHA
-        LSR
-        LSR
-        LSR
-        LSR
-        JSR L9B34
-        PLA
-L9B34   AND #$0F 
-        ORA #$30 
-        CMP #$3A 
-        BCC L9B3E
-        ADC #$06 
-L9B3E   JMP CHROUT
---------------------------------- 
-L9B41   !by $53,$59,$4E,$54,$41,$58,$00     ; SYNTAX.
+        lda     $2b
+        sta     $2d
+        lda     $2c
+        sta     $2e
+        lda     #<L9b98
+        ldy     #>L9b98
+        jsr     $ab1e
+        ldx     #$00
+        stx     $44
+        stx     $43
+L9015:  jsr     CHRIN
+        cmp     #$0d
+        beq     L9024
+        sta     $0120,x
+        inx
+        cpx     #$10
+        bcc     L9015
+L9024:  stx     $b7
+        txa
+        bne     L902c
+        jmp     READY                           ; go handle error message
+-----------------------------------
+L902c:  lda     #<L9baa
+        ldy     #>L9baa
+        jsr     $ab1e
+L9033:  jsr     CHRIN
+        cmp     #$30
+        bcc     L9058
+        cmp     #$3a
+        bcc     L9048
+        cmp     #$41
+        bcc     L9058
+        cmp     #$47
+        bcs     L9058
+        sbc     #$06
+L9048:  asl
+        asl
+        asl
+        asl
+        ldy     #$04
+L904e:  asl
+        rol     $43
+        rol     $44
+        dey
+        bne     L904e
+        beq     L9033
+L9058:  lda     #<L9bbc
+        ldy     #>L9bbc
+        jsr     $ab1e
+        ldx     #$00
+        stx     $57
+        stx     $58
+        stx     $59
+        stx     $5a
+L9069:  jsr     CHRIN
+        cmp     #$0d
+        beq     L907b
+        cpx     #$03
+        bcs     L9069
+        and     #$01
+        sta     $57,x
+        inx
+        bne     L9069
+L907b:  jsr     CRDO
+        ldx     #$00
+        stx     $3e
+        stx     $3f
+        stx     $40
+        stx     $2f
+        stx     $30
+L908a:  stx     $2a
+        ldx     #$00
+        stx     $7a
+        stx     $29
+        stx     $31
+        stx     $32
+        ldx     #$10
+        stx     $7b
+        lda     #$01
+        sta     $bc
+        lda     #$20
+        sta     $bb
+        lda     IONO
+        sta     $ba
+        lda     #$60
+        sta     $b9
+        jsr     L9988
+        lda     $ba
+        jsr     TALK
+        lda     #$60
+        jsr     TKSA
+        jsr     IECIN
+        jsr     IECIN
+        jsr     UNTALK
+        ldx     $3f
+        bne     L90c8
+        jsr     L9325
+L90c8:  jsr     L987c
+        jsr     L9366
+        lda     $2a
+        beq     L90d9
+        lda     $58
+        beq     L90d9
+        jsr     L927d
+L90d9:  lda     $4d
+        bmi     L90e6
+        clc
+        adc     $7a
+        sta     $7a
+        bcc     L90e6
+        inc     $7b
+L90e6:  inc     $31
+        bne     L90ec
+        inc     $32
+L90ec:  lda     $29
+        beq     L90c8
+        lda     IONO
+        sta     $ba
+        jsr     $f648
+        ldx     $2a
+        bne     L90ff
+        inx
+        bne     L908a
+L90ff:  jsr     L92fc
+L9102:  lda     #<L9bce
+        ldy     #>L9bce
+        jsr     $ab1e
+        lda     $32
+        ldx     $31
+        jsr     INTOUT
+        lda     #<L9bd6
+        ldy     #>L9bd6
+        jsr     $ab1e
+        lda     $30
+        ldx     $2f
+        jsr     INTOUT
+        lda     #<L9be2
+        ldy     #>L9be2
+        jsr     $ab1e
+        lda     #$00
+        ldx     $40
+        jsr     INTOUT
+        jsr     L92ff
+        bcs     L9102
+        jsr     L92fc
+        lda     $59
+        beq     L916c
+        jsr     L91f0
+        ldy     #$05
+        lda     #$00
+L913f:  sta     $0110,y
+        dey
+        bpl     L913f
+L9145:  ldy     #$05
+        lda     #$ff
+L9149:  sta     $0100,y
+        dey
+        bpl     L9149
+        ldx     $2b
+        lda     $2c
+L9153:  stx     $22
+        sta     $23
+        cmp     $2e
+        bne     L915d
+        cpx     $2d
+L915d:  bcc     L9175
+        lda     $0100
+        bpl     L916f
+        jsr     L91de
+L9167:  jsr     L92ff
+        bcs     L9167
+L916c:  jmp     READY                           ; go handle error message
+-----------------------------------
+L916f:  jsr     L91ae
+        jmp     L9145
+-----------------------------------
+L9175:  ldy     #$00
+L9177:  lda     ($22),y
+        cmp     $0110,y
+        bne     L9185
+        iny
+        cpy     #$06
+        bne     L9177
+        beq     L91a1
+L9185:  bcc     L91a1
+        ldy     #$00
+L9189:  lda     ($22),y
+        cmp     $0100,y
+        bne     L9195
+        iny
+        cpy     #$06
+        bne     L9189
+L9195:  bcs     L91a1
+        ldy     #$07
+L9199:  lda     ($22),y
+        sta     $0100,y
+        dey
+        bpl     L9199
+L91a1:  lda     $22
+        clc
+        adc     #$08
+        tax
+        lda     $23
+        adc     #$00
+        jmp     L9153
+-----------------------------------
+L91ae:  ldx     $28
+        ldy     #$00
+L91b2:  lda     $0100,y
+        sta     $0110,y
+        sta     $0200,x
+        inx
+        iny
+        cpy     #$06
+        bne     L91b2
+        lda     #$3d
+        sta     $0200,x
+        inx
+        lda     $0106
+        jsr     L91fe
+        lda     $0107
+        jsr     L91fe
+        inx
+        inx
+        cpx     #$27
+        bne     L91da
+        inx
+L91da:  cpx     #$48
+        bcc     L91fb
+L91de:  ldx     #$00
+L91e0:  lda     $0200,x
+        jsr     CHROUT
+        inx
+        cpx     #$4f
+        bne     L91e0
+        jsr     L92ff
+        bcs     L91de
+L91f0:  lda     #$20
+        ldx     #$4f
+L91f4:  sta     $0200,x
+        dex
+        bpl     L91f4
+        inx
+L91fb:  stx     $28
+        rts
+-----------------------------------
+L91fe:  pha
+        lsr
+        lsr
+        lsr
+        lsr
+        jsr     L9209
+        pla
+        and     #$0f
+L9209   ora     #$30
+        cmp     #$3a
+        bcc     L9211
+        adc     #$06
+L9211:  sta     $0200,x
+        inx
+        rts
+-----------------------------------
+L9216:  ldy     $46
+        inc     $46
+        lda     $0140,y
+        bne     L9224
+L921f:  lda     #$00
+        sty     $46
+        rts
+-----------------------------------
+L9224:  cmp     #$3b
+        beq     L921f
+        rts
+-----------------------------------
+L9229:  ldy     $46
+        inc     $46
+        lda     $0140,y
+        beq     L921f
+        rts
+-----------------------------------
+L9233:  cpx     #$01
+        bne     L9240
+L9237:  lda     $63
+        ldy     $62
+L923b:  sta     $69
+        sty     $68
+        rts
+-----------------------------------
+L9240:  cpx     #$2a
+        bne     L924b
+        lda     $7a
+        ldy     $7b
+        jmp     L923b
+-----------------------------------
+L924b:  cpx     #$03
+        beq     L9252
+        jmp     L94d2
+-----------------------------------
+L9252:  lda     $49
+        and     $48
+        sta     $49
+        lda     $48
+        bne     L9267
+        lda     $2a
+        beq     L9237
+        ldy     #>L9b69
+        lda     #<L9b69
+        jmp     L94e1
+-----------------------------------
+L9267:  ldy     #$06
+        lda     ($22),y
+        sta     $68
+        iny
+        lda     ($22),y
+        sta     $69
+L9272:  rts
+-----------------------------------
+L9273:  lda     $0139,y
+        cmp     #$20
+        bne     L9272
+        iny
+        bne     L9273
+L927d:  ldy     $7a
+        lda     $7b
+        ldx     $4d
+        bpl     L928d
+        ldx     #$00
+        stx     $4d
+        ldy     $67
+        lda     $66
+L928d:  sty     $fb
+        sta     $fc
+L9291:  jsr     L99f3
+        jsr     L99ee
+        ldy     #$00
+L9299:  cpy     $4d
+        bcs     L92a6
+        lda     $004e,y
+        jsr     L99fa
+        jmp     L92a9
+-----------------------------------
+L92a6:  jsr     L99eb
+L92a9:  jsr     L99ee
+        iny
+        cpy     #$03
+        bcc     L9299
+        ldy     #$00
+L92b3:  lda     $0139,y
+        jsr     CHROUT
+        iny
+        cpy     #$07
+        bne     L92b3
+        ldx     $27
+        beq     L92db
+        jsr     L9273
+        ldx     #$00
+L92c7:  lda     $0139,y
+        cmp     #$20
+        beq     L92db
+        cmp     #$3d
+        beq     L92db
+        jsr     CHROUT
+        iny
+        inx
+        cpx     #$06
+        bne     L92c7
+L92db:  lda     #$20
+        jsr     CHROUT
+        inx
+        cpx     #$07
+        bne     L92db
+        jsr     L9273
+L92e8:  lda     $0139,y
+        beq     L92f3
+        jsr     CHROUT
+        iny
+        bne     L92e8
+L92f3:  jsr     L92ff
+        bcs     L92f9
+        rts
+-----------------------------------
+L92f9:  jmp     L9291
+-----------------------------------
+L92fc:  jsr     L92ff
+L92ff:  jsr     CRDO
+L9302:  lda     #$04
+        cmp     $9a
+        beq     L9318
+        sta     $9a
+        sta     $ba
+        jsr     LISTN
+        lda     #$ff
+        sta     $b9
+        jsr     $edbe
+        sec
+        rts
+-----------------------------------
+L9318:  ldx     #$03
+        stx     $9a
+        jsr     UNLSN
+        dec     $3d
+        beq     L9325
+        clc
+        rts
+-----------------------------------
+L9325:  jsr     L9302
+        ldx     $3f
+L932a:  jsr     CRDO
+        dex
+        bpl     L932a
+        ldx     #$05
+        stx     $3f
+        ldx     #$41
+        stx     $3d
+        inc     $3e
+        ldx     #$00
+L933c:  lda     $0120,x
+L933f:  jsr     CHROUT
+        inx
+        cpx     $b7
+        bcc     L933c
+        lda     #$20
+        cpx     #$3c
+        bcc     L933f
+        lda     #<L9bed
+        ldy     #>L9bed
+        jsr     $ab1e
+        lda     #$00
+        sta     $68
+        ldx     $3e
+        jsr     INTOUT
+        jsr     CRDO
+        jsr     CRDO
+        jmp     L9318
+-----------------------------------
+L9366:  ldy     #$00
+        sty     $27
+        sty     $46
+        sty     $4d
+        jsr     L9523
+        txa
+        beq     L93c6
+        cpx     #$03
+        bne     L93d2
+        inc     $27
+        ldy     $2a
+        bne     L9399
+        inc     $2f
+        bne     L9384
+        inc     $30
+L9384:  ldy     #$05
+L9386:  lda     $0110,y
+        sta     ($2d),y
+        dey
+        bpl     L9386
+        lda     $48
+        beq     L9399
+        ldy     #>L9b58
+        lda     #<L9b58
+        jsr     L94e1
+L9399:  jsr     L9523
+        cpx     #$3d
+        bne     L93c7
+        lda     #$ff
+        sta     $4d
+        jsr     L9679
+        lda     $6b
+        ldx     $6a
+L93ab:  sta     $67
+        stx     $66
+        ldy     $2a
+        bne     L93c6
+        ldy     #$07
+        sta     ($2d),y
+        txa
+        dey
+        sta     ($2d),y
+        lda     $2d
+        clc
+        adc     #$08
+        sta     $2d
+        bcc     L93c6
+        inc     $2e
+L93c6:  rts
+-----------------------------------
+L93c7:  stx     $28
+        lda     $7a
+        ldx     $7b
+        jsr     L93ab
+        ldx     $28
+L93d2:  cpx     #$02
+        bne     L93d9
+        jmp     L96f2
+-----------------------------------
+L93d9:  cpx     #$2a
+        bne     L93f3
+        jsr     L9523
+        cpx     #$3d
+        beq     L93e7
+L93e4:  jmp     L94d2
+-----------------------------------
+L93e7:  jsr     L9679
+        lda     $6b
+        sta     $7a
+        lda     $6a
+        sta     $7b
+        rts
+-----------------------------------
+L93f3:  cpx     #$2e
+        bne     L93e4
+        ldy     $46
+        ldx     #$00
+L93fb:  lda     L9b81,x
+        cmp     $0140,y
+        bne     L940c
+        iny
+        inx
+        cpx     #$03
+        bne     L93fb
+        inc     $29
+        rts
+-----------------------------------
+L940c:  lda     L9b84,x
+        cmp     $0140,y
+        bne     L9445
+        iny
+        inx
+        cpx     #$04
+        bne     L940c
+        lda     #$ff
+L941c:  sta     $28
+        sty     $46
+L9420:  jsr     L9216
+        bne     L9428
+L9425:  jmp     L94d2
+-----------------------------------
+L9428:  cmp     #$27
+        beq     L9430                   ; was in V3 'bne L9430'
+        cmp     #$22
+        bne     L9420
+L9430:  sta     $07
+L9432:  jsr     L9229
+        beq     L9425
+        cmp     $07
+        beq     L9442
+        and     $28
+        jsr     L94b8
+        bne     L9432
+L9442:  jmp     L94cb
+-----------------------------------
+L9445:  lda     L9b8c,x
+        cmp     $0140,y
+        bne     L9457
+        iny
+        inx
+        cpx     #$04
+        bne     L9445
+        lda     #$3f
+        bne     L941c
+L9457   lda     $0140,Y                 ; was in V3 'lda L9b88x'
+        cmp     L9b88,X                 ; was in V3 'cmp $0140,y'
+        bne     L9469
+L945f:  iny
+        inx
+        cpx     #$04
+        bne     L9457
+        lda     #$00
+        beq     L9481
+L9469:  cpx     #$03
+        bne     L9471
+        cmp     #$44
+        beq     L945f
+L9471:  lda     L9b90,x
+        cmp     $0140,y
+        bne     L949a
+        iny
+        inx
+        cpx     #$04
+        bne     L9471
+        lda     #$ff
+L9481:  sta     $28
+        sty     $46
+L9485:  jsr     L9679
+        lda     $6b
+        jsr     L94b8
+        bit     $28
+        bpl     L94ab
+        jsr     L94d8
+L9494:  cpx     #$2c
+        beq     L9485
+        bne     L94cb
+L949a:  lda     L9b94,x
+        cmp     $0140,y
+        bne     L94b2
+        iny
+        inx
+        cpx     #$04
+        bne     L949a
+        jmp     L9956
+-----------------------------------
+L94ab:  lda     $6a
+        jsr     L94b8
+        bne     L9494
+L94b2:  lda     #<L9b44
+        ldy     #>L9b44
+        bne     L94e1
+L94b8:  pha
+        jsr     L986e
+        pla
+        ldy     $4d
+        sta     ($41),y
+        cpy     #$03
+        bcs     L94c8
+        sta     $004e,y
+L94c8:  inc     $4d
+        rts
+-----------------------------------
+L94cb:  jsr     L9523
+        txa
+        bne     L94d2
+        rts
+-----------------------------------
+L94d2:  lda     #<L9b0f
+        ldy     #>L9b0f
+        bne     L94e1
+L94d8:  lda     $6a
+        bne     L94dd
+        rts
+-----------------------------------
+L94dd:  lda     #<L9b16
+        ldy     #>L9b16
+L94e1:  sty     $63
+        sta     $62
+        stx     $28
+        cmp     #$58
+        beq     L94ef
+        lda     $2a
+        beq     L9520
+L94ef:  inc     $40
+        lda     $57
+        beq     L9520
+L94f5:  ldy     #$00
+L94f7:  lda     $0139,y
+        jsr     CHROUT
+        iny
+        cpy     #$07
+        bne     L94f7
+        ldy     #$00
+L9504:  lda     ($62),y
+        beq     L950e
+        jsr     CHROUT
+        iny
+        bne     L9504
+L950e:  ldy     #$00
+L9510:  lda     L9b7a,y
+        beq     L951b
+        jsr     CHROUT
+        iny
+        bne     L9510
+L951b:  jsr     L92ff
+        bcs     L94f5
+L9520:  ldx     $28
+        rts
+-----------------------------------
+L9523:  ldx     #$00
+        stx     $62
+        stx     $63
+        jsr     L9216
+        bne     L952f
+        rts
+-----------------------------------
+L952f:  cmp     #$20
+        beq     L9523
+        inx
+        cmp     #$27
+        bne     L953e
+L9538:  jsr     L9229
+        sta     $63
+        rts
+-----------------------------------
+L953e:  cmp     #$22
+        beq     L9538
+        cmp     #$24
+        bne     L9570
+L9546:  jsr     L9216
+        beq     L956f
+        cmp     #$30
+        bcc     L956d
+        cmp     #$3a
+        bcc     L955d
+        cmp     #$41
+        bcc     L956d
+        cmp     #$47
+        bcs     L956d
+        sbc     #$06
+L955d:  asl
+        asl
+        asl
+        asl
+        ldy     #$04
+L9563:  asl
+        rol     $63
+        rol     $62
+        dey
+        bne     L9563
+        beq     L9546
+L956d:  dec     $46
+L956f:  rts
+-----------------------------------
+L9570:  cmp     #$40
+        bne     L9592
+L9574:  jsr     L9216
+        beq     L956f
+        cmp     #$30
+        bcc     L956d
+        cmp     #$38
+        bcs     L956d
+        asl
+        asl
+        asl
+        asl
+        asl
+        ldy     #$03
+L9588:  asl
+        rol     $63
+        rol     $62
+        dey
+        bne     L9588
+        beq     L9574
+L9592:  cmp     #$25
+        bne     L95ab
+L9596:  jsr     L9216
+        beq     L956f
+        cmp     #$30
+        beq     L95a3
+        cmp     #$31
+        bne     L956d
+L95a3:  lsr
+        rol     $63
+        rol     $62
+        jmp     L9596
+-----------------------------------
+L95ab:  cmp     #$30
+        bcc     L95ed
+        cmp     #$3a
+        bcs     L95ed
+        bcc     L95c2
+L95b5:  jsr     L9216
+        beq     L956f
+        cmp     #$30
+        bcc     L956d
+        cmp     #$3a
+        bcs     L956d
+L95c2:  and     #$0f
+        pha
+        lda     $63
+        ldy     $62
+        rol     $63
+        rol     $62
+        rol     $63
+        rol     $62
+        clc
+        adc     $63
+        sta     $63
+        tya
+        adc     $62
+        sta     $62
+        rol     $63
+        rol     $62
+        pla
+        adc     $63
+        sta     $63
+        lda     $62
+        adc     #$00
+        sta     $62
+        jmp     L95b5
+-----------------------------------
+L95ed:  tax
+        cmp     #$41
+        bcs     L95f3
+L95f2:  rts
+-----------------------------------
+L95f3:  cmp     #$5b
+        bcs     L95f2
+        ldy     #$04
+        lda     #$20
+L95fb:  sta     $0111,y
+        dey
+        bpl     L95fb
+        stx     $0110
+        ldx     #$01
+L9606:  jsr     L9216
+        beq     L9627
+        cmp     #$30
+        bcc     L9625
+        cmp     #$3a
+        bcc     L961b
+        cmp     #$41
+        bcc     L9625
+        cmp     #$5b
+        bcs     L9625
+L961b:  sta     $0110,x
+        inx
+        cpx     #$06
+        bcc     L9606
+        bcs     L9627
+L9625:  dec     $46
+L9627:  dex
+        bne     L9639
+        ldx     $0110
+        cpx     #$41
+        beq     L95f2
+        cpx     #$59
+        beq     L95f2
+        cpx     #$58
+        beq     L95f2
+L9639:  cpx     #$02
+        bne     L9647
+        jsr     L9996
+        beq     L9647
+        ldx     #$02
+        sta     $47
+        rts
+-----------------------------------
+L9647:  ldx     #$03
+        ldy     #$00
+        sty     $48
+        ldy     $2b
+        lda     $2c
+L9651:  sty     $22
+        sta     $23
+        cmp     $2e
+        bne     L965b
+        cpy     $2d
+L965b:  bcc     L965e
+        rts
+-----------------------------------
+L965e:  ldy     #$05
+L9660:  lda     $0110,y
+        cmp     ($22),y
+        bne     L966d
+        dey
+        bpl     L9660
+        inc     $48
+        rts
+-----------------------------------
+L966d:  lda     $22
+        clc
+        adc     #$08
+        tay
+        lda     $23
+        adc     #$00
+        bne     L9651
+L9679:  jsr     L9523
+        txa
+        bne     L9680
+        rts
+-----------------------------------
+L9680:  lda     #$01
+        sta     $49
+        jsr     L9233
+        lda     $69
+        ldy     $68
+        sta     $6b
+        sty     $6a
+        jmp     L96b5
+-----------------------------------
+L9692:  lda     $4a
+        cmp     #$2b
+        bne     L96a8
+        lda     $6b
+        clc
+        adc     $69
+        sta     $6b
+        lda     $6a
+        adc     $68
+        sta     $6a
+        jmp     L96b5
+-----------------------------------
+L96a8:  lda     $6b
+        sec
+        sbc     $69
+        sta     $6b
+        lda     $6a
+        sbc     $68
+        sta     $6a
+L96b5:  jsr     L9523
+        beq     L96cd
+        stx     $4a
+        cpx     #$2b
+        beq     L96c4
+        cpx     #$2d
+        bne     L96cd
+L96c4:  jsr     L9523
+        jsr     L9233
+        jmp     L9692
+-----------------------------------
+L96cd:  ldy     $49
+        bne     L96d6
+        sty     $6b
+        iny
+        sty     $6a
+L96d6:  cpx     #$5b
+        beq     L96de
+        cpx     #$3e
+        bne     L96e9
+L96de:  ldy     $6a
+        sty     $6b
+L96e2:  ldy     #$00
+        sty     $6a
+        jmp     L9523
+-----------------------------------
+L96e9:  cpx     #$5d
+        beq     L96e2
+        cpx     #$3c
+        beq     L96e2
+        rts
+-----------------------------------
+L96f2:  ldx     #$01
+        stx     $4d
+        ldy     $47
+        cpy     #$05
+        beq     L9719
+        jsr     L9523
+        cpx     #$41
+        bne     L9709
+        lda     #$0a
+        sta     $4c
+        bne     L9719
+L9709:  inc     $4d
+        cpx     #$23
+        bne     L971c
+        lda     #$02
+        sta     $4c
+        jsr     L9679
+        jsr     L94d8
+L9719:  jmp     L9794
+-----------------------------------
+L971c:  cpx     #$28
+        bne     L9762
+        jsr     L9679
+        cpx     #$2c
+        bne     L9741
+        lda     #$00
+        sta     $4c
+        jsr     L94d8
+        jsr     L9523
+        cpx     #$58
+        beq     L9738
+L9735:  jmp     L97c2
+-----------------------------------
+L9738:  jsr     L9523
+        cpx     #$29
+        bne     L9735
+        beq     L9794
+L9741:  lda     #$04
+        sta     $4c
+        cpx     #$29
+        bne     L9735
+        jsr     L9523
+        txa
+        bne     L9755
+        lda     #$08
+        sta     $4c
+        bne     L9794
+L9755:  cpx     #$2c
+        bne     L9735
+        jsr     L9523
+        cpx     #$59
+        bne     L9735
+        beq     L9794
+L9762:  lda     #$01
+        sta     $4c
+        jsr     L9680
+        cpx     #$2c
+        bne     L9780
+        jsr     L9523
+        lda     #$05
+        sta     $4c
+        cpx     #$58
+        beq     L9780
+        cpx     #$59
+        bne     L9735
+        lda     #$09
+        sta     $4c
+L9780:  lda     $6a
+        beq     L9794
+        inc     $4c
+        inc     $4c
+        inc     $4d
+        lda     $4c
+        cmp     #$09
+        bcc     L9794
+        lda     #$06
+        sta     $4c
+L9794:  jsr     L94cb
+        lda     $6b
+        sta     $4f
+        lda     $6a
+        sta     $50
+        ldx     $47
+        dex
+        bne     L97d4
+        lda     $4c
+        cmp     #$09
+        bne     L97b2
+        lda     #$06
+        sta     $4c
+        lda     #$03
+        sta     $4d
+L97b2:  lda     $4c
+        cmp     #$08
+        bcs     L97c2
+        cmp     #$02
+        bne     L97c9
+        lda     $4b
+        cmp     #$81
+        bne     L97c9
+L97c2:  lda     #<L9b34
+        ldy     #>L9b34
+        jmp     L94e1
+-----------------------------------
+L97c9:  lda     $4c
+        asl
+        asl
+        adc     $4b
+        sta     $4b
+        jmp     L9839
+-----------------------------------
+L97d4:  dex
+        bne     L97f2
+        lda     $4c
+        cmp     #$09
+        bcs     L97e2
+        lsr
+        bcs     L97c9
+        bcc     L97c2
+L97e2:  cmp     #$0a
+        bne     L97c2
+        lda     $4b
+        cmp     #$63
+        bcs     L97c2
+        adc     #$08
+        sta     $4b
+        bne     L9839
+L97f2:  dex
+        bne     L983c
+        lda     #$02
+        sta     $4d
+        lda     $6b
+        sec
+        sbc     $7a
+        sta     $69
+        lda     $6a
+        sbc     $7b
+        sta     $68
+        lda     $69
+        sec
+        sbc     #$02
+        sta     $69
+        lda     $68
+        sbc     #$00
+        sta     $68
+        bmi     L982d
+        bne     L981b
+        lda     $69
+        bpl     L9835
+L981b:  lda     #$00
+        sta     $69
+        lda     $2a
+        beq     L9835
+        lda     #<L9b25
+        ldy     #>L9b25
+        jsr     L94e1
+        jmp     L9835
+-----------------------------------
+L982d:  cmp     #$ff
+        bne     L981b
+        lda     $69
+        bpl     L981b
+L9835:  lda     $69
+        sta     $4f
+L9839:  jmp     L985b
+-----------------------------------
+L983c:  dex
+        bne     L985b
+        lda     $4b
+        cmp     #$14
+        beq     L9849
+        cmp     #$0a
+        bne     L984d
+L9849:  ldy     #$03
+        sty     $4d
+L984d:  clc
+        adc     $4c
+        tay
+        lda     $9ab8,y
+        bne     L9859
+        jmp     L97c2
+-----------------------------------
+L9859:  sta     $4b
+L985b:  lda     $4b
+        sta     $4e
+        jsr     L986e
+        ldy     $4d
+        dey
+L9865:  lda     $004e,y
+        sta     ($41),y
+        dey
+        bpl     L9865
+        rts
+-----------------------------------
+L986e:  lda     $7a
+        sec
+        sbc     $43
+        sta     $41
+        lda     $7b
+        sbc     $44
+        sta     $42
+        rts
+-----------------------------------
+L987c:  ldy     #$00
+        sty     $68
+        sty     $90
+        lda     IONO
+        sta     $ba
+        jsr     TALK
+        lda     #$60
+        jsr     TKSA
+        jsr     IECIN
+        jsr     IECIN
+        jsr     IECIN
+        tax
+        jsr     IECIN
+        ldy     $90
+        beq     L98a4
+        lda     #$ff
+        ldx     #$ff
+L98a4:  sta     $62
+        stx     $63
+        ldx     #$90
+        sec
+        jsr     ADD
+        jsr     FLPSTR
+        ldy     #$05
+        ldx     #$ff
+L98b5:  inx
+        lda     $0100,x
+        bne     L98b5
+L98bb:  dex
+        bmi     L98c1
+        lda     $0100,x
+L98c1:  sta     $0200,y
+        dey
+        bpl     L98bb
+        ldy     #$06
+        sta     $0200,y
+        iny
+        ldx     $90
+        bne     L98e1
+L98d1:  jsr     IECIN
+        ldx     $90
+        bne     L98e1
+        tax
+        beq     L98ef
+        sta     $0200,y
+        iny
+        bne     L98d1
+L98e1:  lda     #$2e
+        sta     $0200,y
+        iny
+        lda     #$80
+        sta     $0200,y
+        iny
+        lda     #$00
+L98ef:  sta     $0200,y
+        jsr     UNTALK
+        ldy     #$00
+        sty     $0c
+        sty     $23
+        sty     $22
+L98fd:  ldy     $22
+        inc     $22
+        lda     $0200,y
+        bmi     L991f
+        cmp     #$22
+        bne     L9912
+        lda     $0c
+        eor     #$ff
+        sta     $0c
+        lda     #$22
+L9912:  ldy     $23
+        sta     $0139,y
+        tax
+        bne     L991b
+        rts
+-----------------------------------
+L991b:  inc     $23
+        bne     L98fd
+L991f:  cmp     #$ff
+        beq     L9912
+        bit     $0c
+        bmi     L9912
+        tax
+        ldy     #$9e
+        sty     $62
+        ldy     #$a0
+        sty     $63
+        ldy     #$00
+        asl
+        beq     L9947
+L9935:  dex
+        bpl     L9946
+L9938:  inc     $62
+        bne     L993e
+        inc     $63
+L993e:  lda     ($62),y
+        bpl     L9938
+        bmi     L9935
+L9944:  inc     $23
+L9946:  iny
+L9947:  ldx     $23
+        lda     ($62),y
+        pha
+        and     #$7f
+        sta     $0139,x
+        pla
+        bpl     L9944
+        bmi     L991b
+L9956:  iny
+        tya
+        clc
+        adc     #$40
+        sta     $bb
+        lda     #$01
+        sta     $bc
+        lda     IONO
+        sta     $ba
+        jsr     $f648
+        lda     #$60
+        sta     $b9
+        jsr     L9988
+        lda     $ba
+        jsr     TALK
+        lda     #$60
+        jsr     TKSA
+        jsr     IECIN
+        jsr     IECIN
+        jsr     UNTALK
+        pla
+        pla
+        jmp     L90c8
+-----------------------------------
+L9988:  jsr     L998e
+        bcs     L9993
+L998d:  rts
+-----------------------------------
+L998e:  jsr     $f3d5
+        bcc     L998d
+L9993:  jmp     EREXIT
+-----------------------------------
+L9996:  ldy     #$02
+L9998:  lda     $0110,y
+        sta     $0024,y
+        and     #$40
+        beq     L99c4
+        dey
+        bpl     L9998
+        lda     $26
+        asl
+        asl
+        asl
+        ldx     #$03
+L99ac:  asl
+        rol     $25
+        dex
+        bpl     L99ac
+        rol     $24
+        cpx     #$fd
+        bne     L99ac
+        ldy     #$37
+L99ba:  lda     $24
+        cmp     L9a10,y
+        beq     L99c7
+L99c1:  dey
+        bpl     L99ba
+L99c4:  lda     #$00
+        rts
+-----------------------------------
+L99c7:  lda     $25
+        cmp     L9a48,y
+        bne     L99c1
+        lda     L9a80,y
+        ldx     #$05
+        cpy     #$1f
+        bcs     L99e7
+        dex
+        cpy     #$16
+        bcs     L99e7
+        dex
+        cpy     #$0e
+        bcs     L99e7
+        dex
+        cpy     #$08
+        bcs     L99e7
+        dex
+L99e7:  sta     $4b
+        txa
+        rts
+-----------------------------------
+L99eb:  jsr     L99ee
+L99ee:  lda     #$20
+        jmp     CHROUT
+-----------------------------------
+L99f3:  lda     $fc
+        jsr     L99fa
+        lda     $fb
+L99fa:  pha
+        lsr
+        lsr
+        lsr
+        lsr
+        jsr     L9a03
+        pla
+L9a03:  and     #$0f
+        ora     #$30
+        cmp     #$3a
+        bcc     L9a0d
+        adc     #$06
+L9a0d:  jmp     CHROUT
+-----------------------------------
+L9a10:  !by     $09,$0b,$1b,$2b,$61,$7c,$98,$9d
+        !by     $0c,$21,$4b,$64,$93,$93,$10,$10
+        !by     $11,$13,$13,$14,$15,$15,$12,$1c
+        !by     $1c,$53,$54,$61,$61,$9d,$9d,$14
+        !by     $1b,$1b,$1b,$1b,$21,$21,$4b,$4b
+        !by     $73,$82,$82,$83,$83,$95,$95,$99
+        !by     $99,$99,$a0,$a0,$a4,$a6,$a6,$a6
+L9a48:  !by     $06,$88,$60,$e4,$02,$82,$86,$02
+        !by     $d8,$46,$86,$e4,$d8,$e4,$c6,$e6
+        !by     $62,$52,$8a,$18,$86,$a6,$68,$30
+        !by     $32,$60,$e4,$30,$32,$30,$32,$96
+        !by     $06,$08,$12,$2c,$70,$72,$b0,$b2
+        !by     $e0,$02,$20,$02,$20,$12,$26,$46
+        !by     $48,$52,$70,$72,$f0,$02,$26,$42
+L9a80:  !by     $61,$21,$c1,$41,$a1,$01,$e1,$81
+        !by     $02,$c2,$e2,$42,$22,$62,$90,$b0
+        !by     $f0,$30,$d0,$10,$50,$70,$00,$1e
+        !by     $28,$0a,$14,$32,$3c,$46,$50,$00
+        !by     $18,$d8,$58,$b8,$ca,$88,$e8,$c8
+        !by     $ea,$48,$08,$68,$28,$40,$60,$38
+        !by     $f8,$78,$aa,$a8,$ba,$8a,$9a,$98
+L9ab8:  !by     $00,$24,$00,$2c,$00,$00,$00,$00
+        !by     $00,$00,$00,$4c,$00,$4c,$00,$00
+        !by     $00,$00,$6c,$00,$00,$20,$00,$20
+        !by     $00,$00,$00,$00,$00,$00,$00,$e4
+        !by     $e0,$ec,$00,$00,$00,$00,$00,$00
+        !by     $00,$c4,$c0,$cc,$00,$00,$00,$00
+        !by     $00,$00,$00,$a6,$a2,$ae,$00,$00
+        !by     $be,$00,$00,$b6,$00,$a4,$a0,$ac
+        !by     $00,$b4,$00,$bc,$00,$00,$00,$86
+        !by     $00,$8e,$00,$00,$00,$00,$00,$96
+        !by     $00,$84,$00,$8c,$00,$94,$00
 
-L9B48   !by $4F,$4E,$45,$20,$42,$59,$54,$45 ; ONE BYTE
-        !by $20,$52,$41,$4E,$47,$45,$00     ; RANGE.
+L9b0f:  !by     $53,$59,$4e,$54,$41,$58,$00     ; syntax.
 
-L9B57   !by $52,$45,$4C,$41,$54,$49,$56,$20 ; RELATIV 
-        !by $42,$52,$41,$4E,$43,$48,$00     ; BRANCH.
+L9b16:  !by     $4f,$4e,$45,$20,$42,$59,$54,$45 ; one byte
+        !by     $20,$52,$41,$4e,$47,$45,$00     ;  range.
 
-L9B66   !by $49,$4C,$4C,$45,$47,$41,$4C,$20 ; ILLEGAL 
-        !by $4F,$50,$45,$52,$41,$4E,$44,$00 ; OPERAND.
+L9b25:  !by     $52,$45,$4c,$41,$54,$49,$56,$20 ; relativ 
+        !by     $42,$52,$41,$4e,$43,$48,$00     ; branch.
 
-L9B76   !by $55,$4E,$44,$45,$46,$49,$4E,$45 ; UNDEFINE 
-        !by $44,$20,$44,$49,$52,$45,$43,$54 ; D DIRECT
-        !by $49,$56,$45,$00                 ; IVE.
+L9b34:  !by     $49,$4c,$4c,$45,$47,$41,$4c,$20 ; illegal 
+        !by     $4f,$50,$45,$52,$41,$4e,$44,$00 ; operand.
 
-L9B8A   !by $44,$55,$50,$4C,$49,$43,$41,$54 ; DUPLICAT
-        !by $45,$20,$53,$59,$4D,$42,$4F,$4C ; E SYMBOL
-        !by $00
-L9B9B   !by $55,$4E,$44,$45,$46,$49,$4E,$45 ; UNDEFINE
-        !by $44,$20,$53,$59,$4D,$42,$4F,$4C ; D SYMBOL
-        !by $00
+L9b44:  !by     $55,$4e,$44,$45,$46,$49,$4e,$44 ; undefind
+        !by     $45,$20,$44,$49,$52,$45,$43,$54 ; e direct
+        !by     $49,$56,$45,$00                 ; ive.
 
-L9BAC   !by $20,$45,$52,$52,$4F,$52,$00     ; ERROR.
-L9BB3   !by $45,$4E,$44                     ; END
-L9BB6   !by $54,$45,$58,$54                 ; TEXT
-L9BBA   !by $57,$4F,$52,$54                 ; WORT
-L9BBE   !by $44,$49,$53,$50                 ; DISP
-L9BC2   !by $42,$59,$54,$45                 ; BYTE
-L9BC6   !by $4C,$4F,$41,$44                 ; LOAD
-L9BCA   !by $43,$4F,$52,$52                 ; CORR
+L9b58:  !by     $44,$55,$50,$4c,$49,$43,$41,$54 ; duplicat
+        !by     $45,$20,$53,$59,$4d,$42,$4f,$4c ; e symbol
+        !by     $00
 
-; ----------------------------------------------
-; - part of Assembler, will be copied to RAM ---
-; ----------------------------------------------
-L9BCE   STX $01
-        LDX #$03 
-L9BD2   STA $22
-        STY $23
-        CPY $2E
-        BNE L9BDC
-        CMP $2D
-L9BDC   BCS L9C01
-        LDY #$05 
-L9BE0   LDA ($22),Y
-        CMP $0110,Y
-        BNE L9BEE
-        DEY
-        BPL L9BE0
-        INC $48
-        BNE L9C01
-L9BEE   LDY $23
-        LDA $22
-        CLC
-        ADC #$08 
-        BCC L9BD2
-        INY
-        BCS L9BD2
-        LDA #$00 
-        SEI
-        STA $01
-        LDA ($22),Y
-L9C01   PHA
-        LDA #$37 
-        STA $01
-        PLA
-        CLI
-        RTS
---------------------------------- 
-        PHA
-        LDA #$00 
-        SEI
-        STA $01
-        PLA
-        STA ($2D),Y
-        JMP $037A
---------------------------------- 
+L9b69:  !by     $55,$4e,$44,$45,$46,$49,$4e,$44 ; undefind
+        !by     $45,$20,$53,$59,$4d,$42,$4f,$4c ; e symbol
+        !by     $00                             ; .
+                                      
+L9b7a:  !by     $20,$45,$52,$52,$4f,$52,$00     ;  error.
+L9b81:  !by     $45,$4e,$44                     ; end
+L9b84:  !by     $54,$45,$58,$54                 ; text
+L9b88:  !by     $57,$4f,$52,$54                 ; wort
+L9b8c:  !by     $44,$49,$53,$50                 ; disp
+L9b90:  !by     $42,$59,$54,$45                 ; byte
+L9b94:  !by     $4c,$4f,$41,$44                 ; load
+L9b98:  !by     $0d,$50,$52,$4f,$47,$52,$41,$4d ; .program
+        !by     $4d,$4e,$41,$4d,$45,$20,$20,$3a ; mname  :
+        !by     $20,$00                         ;  . 
+L9baa:  !by     $0d,$48,$45,$58,$41,$20         ; .hexa
+        !by     $4b,$4f,$52,$52,$2d,$50,$4f,$4b ; korr-pok
+        !by     $45,$3a,$20,$00                 ; e: .
+L9bbc:  !by     $0d,$41,$55,$53,$44,$52,$55,$43 ; .ausdruc
+        !by     $4b,$2d,$43,$4f,$44,$45,$20,$3a ; k-code :
+        !by     $20,$00                         ;  .
+L9bce:  !by     $5a,$45,$49,$4c,$45,$4e,$3a,$00 ; .zeilen:.
+L9bd6:  !by     $20,$20,$20,$53,$59,$4d,$42,$4f ;    symbo
+        !by     $4c,$45,$3a,$00                 ; le:.
+L9be2:  !by     $20,$20,$20,$46,$45,$48,$4c,$45 ;    fehle
+        !by     $52,$3a,$00                     ; r:.
+L9bed:  !by     $53,$45,$49,$54,$45,$3a,$00     ; seite:.
 
-L9C15   !by $0D,$50,$52,$4F,$47,$52,$41,$4D ; .PROGRAM
-        !by $4E,$41,$4D,$45,$20,$20,$3A,$20 ; NAME  : 
-        !by $00 
+FILL3:  !fi     $9c00-FILL3, $00
+; - $9C00  basic command RENEW -----------------    
+RENEW:  jmp     L9eb4                           ; was in V3 'jmp L9eaf'
+; - $9C03  basic command CHECK UNDEF'D ---------
+UNDEF:  jmp     L9c37
+; - $9C06  basic command COMPACTOR -------------
+COMPACTOR:
+        jsr     L9c18
+        ldx     #$01
+        stx     $0133
+        stx     $0135
+        dex
+        stx     $0134
+        jmp     L802d
+-----------------------------------
+L9c18:  ldx     #$f0
+        jsr     CHRGET
+        beq     L9c2c
+        jsr     $b79e
+        txa
+        bne     L9c28
+L9c25:  jmp     ERRFC                           ; llegal quantity error
+-----------------------------------
+L9c28:  cpx     #$f1
+        bcs     L9c25
+L9c2c:  stx     $fc
+        jsr     L9c3a
+        jsr     L9c86
+        jmp     $a533
+-----------------------------------
+L9c37:  lda     #$01
+        !by     $2c
+L9c3a:  lda     #$00
+        sta     $0133
+        jsr     L9c55
+        lda     $0133
+        bne     L9c48
+        rts
+-----------------------------------
+L9c48:  lda     #$00
+        sta     $c6
+        ldx     #$fa
+        txs
+        jsr     $a533
+        jmp     READY                           ; go handle error message
+-----------------------------------
+L9c55:  jsr     $a68e
+L9C58   jsr     L9D9C                           ; was in V3 'jsr L9d97'
+L9c5b:  jsr     CHRGET
+L9c5e:  tax
+        beq     L9C58
+        jsr     L9DF3                           ; was in V3 'jsr L9dee'
+        bcc     L9c5e
+        jsr     L9DB2                           ; was in V3 'jsr L9dad'
+        bne     L9c5b
+L9c6b:  jsr     CHRGET
+        bcs     L9c5e
+        jsr     $a96b
+        jsr     L9E72                           ; was in V3 'jsr L9e6d'
+        bcs     L9c7d
+        ldx     #$5a
+        jsr     L9DCB                           ; was in V3 'jsr 9dc6'
+L9c7d:  jsr     CHRGOT
+        cmp     #$2c
+        bne     L9c5e
+        beq     L9c6b
+L9c86:  ldy     #$00
+        sty     $0133
+        sty     $0134
+        sty     $0135
+        jsr     $a68e
+L9c94:  lda     $7a
+        sta     $47
+        lda     $7b
+        sta     $48
+        jsr     L9D9C                           ; was in V3 'jsr 9d97'
+        inc     $7a
+        bne     L9ca5
+        inc     $7b
+L9ca5:  jsr     L9DEA                           ; was in V3 'jsr 9de5'
+        lda     $0133
+        bne     L9cb4
+L9cad:  lda     #$00
+        sta     $0135
+        beq     L9cec
+L9cb4:  ldy     #$ff
+L9cb6:  iny
+        lda     ($3d),y
+        bne     L9cb6
+        tya
+        clc
+        adc     $0135
+        bcs     L9cad
+        cmp     $fc
+        bcs     L9cad
+        ldy     #$02
+        lda     ($47),y
+        cmp     #$ff
+        beq     L9cad
+        ldy     #$00
+        lda     $0134
+        beq     L9cdf
+        lda     #$22
+        sta     ($47),y
+        inc     $47
+        bne     L9cdf
+        inc     $48
+L9cdf:  lda     #$3a
+        sta     ($47),y
+        inc     $47
+        bne     L9ce9
+        inc     $48
+L9ce9:  jsr     L9E27                           ; was in V3 'jsr 9e22'
+L9cec:  ldx     #$00
+        stx     $0134
+        inx
+        stx     $0133
+        inc     $0135
+L9cf8:  ldy     #$00
+L9cfa:  lda     ($7a),y
+        bne     L9d01
+        jmp     L9c94
+---------------------------------
+L9d01:  inc     $7a
+        bne     L9d07
+        inc     $7b
+L9d07:  inc     $0135
+        cmp     #$22
+        bne     L9d26
+L9d0e:  lda     ($7a),y
+        bne     L9d17
+        inc     $0134
+        bne     L9cfa
+L9d17:  inc     $7a
+        bne     L9d1d
+        inc     $7b
+L9d1d:  inc     $0135
+        cmp     #$22
+        bne     L9d0e
+        beq     L9cfa
+L9d26:  cmp     #$8b
+        bne     L9d31
+L9d2a:  lda     #$00
+        sta     $0133
+        beq     L9cfa
+L9d31:  cmp     #$8d
+        beq     L9cfa
+        jsr     L9DB2                           ; was in V3 'jsr L9dad'
+        beq     L9d2a
+        cmp     #$20
+        bne     L9d4a
+        jsr     L9EA6                           ; was in V3 'jsr L9ea1'
+L9d41:  jsr     L9DEA                           ; was in V3 'jsr L9de5'
+        jsr     L9E27                           ; was in V3 'jsr L9e22'
+        jmp     L9cf8
+---------------------------------
+L9d4a:  cmp     #$8f
+        bne     L9d6b
+        jsr     L9EA6                           ; was in V3 'jsr L9ea1'
+        lda     #$3a
+        sta     ($47),y
+        inc     $47
+        bne     L9d5b
+        inc     $48
+L9d5b:  lda     ($7a),y
+L9d5d:  beq     L9cfa
+L9d5f:  inc     $7a
+        bne     L9d65
+        inc     $7b
+L9d65:  lda     ($7a),y
+        bne     L9d5f
+        beq     L9d41
+L9d6b:  cmp     #$83
+        bne     L9cfa
+L9D6F:  lda     ($7a),y
+L9d71:  beq     L9cfa
+        inc     $7a
+        bne     L9d79
+        inc     $7b
+L9d79:  inc     $0135
+        cmp     #$3a
+        beq     L9d5d
+        cmp     #$22
+        bne     L9D6F
+L9D84:  lda     ($7a),y
+; here are some changes in this version compare to V3
+        bne     L9D8D
+        inc     $0134
+        bne     L9D6F
+L9D8D   inc     $7a
+        bne     L9D93
+        inc     $7b
+L9D93   inc     $0135
+        cmp     #$22
+        bne     L9D84
+        beq     L9D6F
+L9D9C   ldy     #$02
+        lda     ($7a),y
+        bne     L9DA5
+        pla
+        pla
+        rts
+; end of changes???
+---------------------------------
+L9DA5   iny
+        lda     ($7a),y
+        sta     $39
+        iny
+        lda     ($7a),y
+        sta     $3a
+        jmp     $a8fb
+---------------------------------
+L9DB2   cmp     #$cb
+        bne     L9DBC
+        jsr     CHRGET
+        cmp     #$a4
+        rts
+---------------------------------
+L9DBC   cmp     #$a7
+        beq     L9DCA
+        cmp     #$89
+        beq     L9DCA
+        cmp     #$8d
+        beq     L9DCA
+        cmp     #$8a
+L9DCA   rts
+---------------------------------
+L9DCB   lda     $a225,x                         ; verweisst auf "data" im ROM
+        pha
+        and     #$7f
+        jsr     CHROUT
+        inx
+        pla
+        bpl     L9DCB
+        lda     #$6a
+        ldy     #$a3
+        jsr     $ab1e
+        jsr     $bdc2
+        lda     #$ff
+        sta     $0133
+        jmp     CRDO
+---------------------------------
+L9DEA   ldx     $7a
+        stx     $3d
+        ldx     $7b
+        stx     $3e
+        rts
+---------------------------------
+L9DF3   cmp     #$22
+        bne     L9E0F
+        ldy     #$00
+        inc     $7a
+        bne     L9DFF
+        inc     $7b
+L9DFF   lda     ($7a),y
+        beq     L9E16
+        inc     $7a
+        bne     L9E09
+        inc     $7b
+L9E09   cmp     #$22
+        bne     L9DFF
+        beq     L9E16
+L9E0F   cmp     #$8f
+        bne     L9E1B
+        jsr     $a93b
+L9E16   jsr     CHRGOT
+        clc
+        rts
+---------------------------------
+L9E1B   cmp     #$83
+        bne     L9E25
+        jsr     $a8f8
+        jmp     L9E16
+---------------------------------
+L9E25   sec
+        rts
+---------------------------------
+L9E27   lda     $47
+        sta     $7a
+        lda     $48
+        sta     $7b
+        lda     $3e
+        sta     $23
+        lda     $2d
+        sta     $22
+        lda     $48
+        sta     $25
+        lda     $47
+        sec
+        sbc     $3d
+        clc
+        adc     $2d
+        sta     $2d
+        sta     $24
+        lda     $2e
+        adc     #$ff
+        sta     $2e
+        sbc     $48
+        tax
+        lda     $47
+        sec
+        sbc     $2d
+        tay
+        bcs     L9E5B
+        inx
+        dec     $25
+L9E5B   clc
+        adc     $22
+        bcc     L9E63
+        dec     $23
+        clc
+L9E63   lda     ($22),y
+        sta     ($24),y
+        iny
+        bne     L9E63
+        inc     $23
+        inc     $25
+        dex
+        bne     L9E63
+        rts
+---------------------------------
+L9E72   lda     $2b
+        ldx     $2c
+L9E76   ldy     #$01
+        sta     $5f
+        stx     $60
+        lda     ($5f),y
+        beq     L9EA4
+        ldy     #$03
+        lda     $15
+        cmp     ($5f),y
+        bcc     L9EA5
+        bne     L9E99
+        dey
+        lda     $14
+        cmp     ($5f),y
+        bcc     L9EA5
+        bne     L9E99
+        dey
+        lda     #$ff
+        sta     ($5f),y
+        rts
+---------------------------------
+L9E99   ldy     #$00
+        lda     ($5f),y
+        cmp     $5f
+        bcs     L9E76
+        inx
+        bcc     L9E76
+L9EA4   clc
+L9EA5   rts
+---------------------------------
+L9EA6   lda     $7b
+        sta     $48
+        ldx     $7a
+        bne     L9EB0
+        dec     $48
+L9EB0   dex
+        stx     $47
+        rts
+---------------------------------
+L9eb4   lda     $2b
+        ldx     $2c
+        sta     $22
+        stx     $23
+L9EBC   ldy     #$03
+L9EBE   iny
+        beq     L9F00
+        lda     ($22),y
+        bne     L9EBE
+        tya
+        sec
+        adc     $22
+        tax
+        ldy     #$00
+        tya
+        adc     $23
+        cmp     $38
+        bne     L9ED5
+        cpx     $37
+L9ED5   bcs     L9F00
+        pha
+        txa
+        sta     ($22),y
+        iny
+        pla
+        sta     ($22),y
+        stx     $22
+        sta     $23
+        lda     ($22),y
+        bne     L9EBC
+        dey
+        lda     ($22),y
+        bne     L9EBC
+L9EEC   clc
+        lda     $22
+        ldy     $23
+        adc     #$02
+        bcc     L9EF6
+        iny
+L9EF6   sta     $2d
+        sty     $2e
+        jsr     $a660
+        jmp     READY                           ; go handle error message
+---------------------------------
+L9F00   tya
+        sta     ($22),y
+        iny
+        sta     ($22),y
+        bne     L9EEC
 
-L9C26   !by $0D,$50,$52,$49,$4E,$54,$4F,$55 ;.PRINTOU
-        !by $54,$20,$4D,$4F,$44,$45,$3A,$20 ; T MODE: 
-        !by $00
-
-L9C37   !by $4C,$49,$4E,$45,$53,$3A,$00     ; LINES:.
-
-L9C3E   !by $20,$20,$20,$53,$59,$4D,$42,$4F ;   SYMBO
-        !by $4C,$53,$3A,$00                 ; LS:.
-
-L9C4A   !by $20,$20,$20,$45,$52,$52,$4F,$52 ;    ERROR
-        !by $53,$3A,$00                     ; S:.
-
-L9C55   !by $50,$41,$47,$45,$3A,$00         ; PAGE:.
-
-L9C5B   !by $40,$02,$45,$03,$D0,$08,$40,$09 ; @.E...@.
-        !by $30,$22,$45,$33,$D0,$08,$40,$09 ; 0"E3..@.
-        !by $40,$02,$45,$33,$D0,$08,$40,$09 ; @.E3..@.
-        !by $40,$02,$45,$B3,$D0,$08,$40,$09 ; @.E...@.
-        !by $00,$22,$44,$33,$D0,$8C,$44,$00 ; ."D3..D.
-        !by $11,$22,$44,$33,$D0,$8C,$44,$9A ; ."D3..D.
-        !by $10,$22,$44,$33,$D0,$08,$40,$09 ; ."D3..@.
-        !by $10,$22,$44,$33,$D0,$08,$40,$09 ; ."D3..@.
-        !by $62,$13,$78,$A9
-L9C9F   !by $00,$41,$01,$02,$00,$20,$99,$8D
-        !by $11,$12,$06,$8A,$05
-L9CAC   !by $21,$2C,$29,$2C,$41,$23
-L9CB2   !by $28,$59,$00,$58,$00,$00,$00
-L9CB9   !by $14,$82,$14,$1B,$54,$83,$13,$99
-        !by $95,$82,$15,$1B,$95,$83,$15,$99
-        !by $00,$21,$10,$A6,$61,$A0,$10,$1B
-        !by $1C,$4B,$13,$1B,$1C,$4B,$11,$99
-        !by $00,$12,$53,$53,$9D,$61,$1C,$1C
-        !by $A6,$A6,$A0,$A4,$21,$00,$73,$00
-        !by $0C,$93,$64,$93,$9D,$61,$21,$4B
-        !by $7C,$0B,$2B,$09,$9D,$61,$1B,$98
-L9CF9   !by $96,$20,$18,$06,$E4,$20,$52,$46
-        !by $12,$02,$86,$12,$26,$02,$A6,$52
-        !by $00,$72,$C6,$42,$32,$72,$E6,$2C
-        !by $32,$B2,$8A,$08,$30,$B0,$62,$48
-        !by $00,$68,$60,$60,$32,$32,$32,$30
-        !by $02,$26,$70,$F0,$70,$00,$E0,$00
-        !by $D8,$D8,$E4,$E4,$30,$30,$46,$86
-        !by $82,$88,$E4,$06,$02,$02,$60,$86
-; - $9D39  module information message ----------
-L9D39   !by $0D,$20,$20,$20,$20,$2A,$2A ; .. ;,$**
-        !by $2A,$2A,$20,$20,$20,$20,$48,$45 ; ** ;,$HE
-        !by $4C,$50,$20,$20,$43,$2D,$36,$34 ; LP  C-64
-        !by $20,$20,$50,$4C,$55,$53,$20,$20 ;   PLUS  
-        !by $20,$2A,$2A,$2A,$2A,$20,$20,$20 ; ,$**** ;
-        !by $20,$0D,$00 ;  ..
-
-; - $9D63  undef'd statement error -------------
-L9D63   !by $55,$4E,$44,$45,$46,$27,$44,$20 ; UNDEF'D 
-        !by $53,$54,$41,$54,$45,$4D,$45,$4E ; STATEMEN
-        !by $54,$20,$45,$52,$52,$4F,$52,$20 ; T ERROR 
-        !by $00
-
-; - $9D7C  overwrite message text --------------
-L9D7C   !by $0D,$4F,$56,$45,$52,$57,$52,$49 ; .OVERWRI
-        !by $54,$45,$3F,$20,$12,$59,$92,$45 ; TE? .Y.E
-        !by $53,$2F,$12,$4E,$92,$4F,$0D,$00 ; S/.N.O..
-
-; - $9D94  DOS and monitor commands char -------
-L9D94   !by $3E,$40,$3C,$2F,$5E,$24,$5D,$23 ; >@</^$]#
-        !by $21,$5F,$2A,$28,$29,$25,$5C,$5B ; !_*()%£[
-
-; - $9DA4  commands low byte -------------------
-DMLBYT  !by <RDCH15,<RDDCH,<VERIFY,<LDREL,<LDRUN,<LDDIR,<MONI,<BASCMD
-        !by <CONVERT,<SAVEPRG,<PRTFRE,<OPNFILE,<CLFILE,<LDABS,<SETIONO,<ASSEMBLER
-
-; - $9DB4  commands high byte ------------------
-DMHBYT  !by >RDCH15,>RDDCH,>VERIFY,>LDREL,>LDRUN,>LDDIR,>MONI,>BASCMD
-        !by >CONVERT,>SAVEPRG,>PRTFRE,>OPNFILE,>CLFILE,>LDABS,>SETIONO,>ASSEMBLER
-
-; - #9DC4  basic commands char -----------------
-L9DC4   !by $41,$44,$45,$46,$47,$48,$4B,$4C ; ADEFGHKL
-        !by $4D,$52,$53,$54,$56,$55,$43,$42 ; MRSTVUCB
-; - #9DD4  basic commands low byte -------------
-L9DD4   !by <APPEND,<DELETE,<ENDTRACE,<FIND,<GENLINE,<HELP,<KILL,<LPAGE
-        !by <M_DUMP,<RENUMBER,<S_STEP,<TRACE,<V_DUMP,<UNDEF,<COMPACTOR,<RENEW
-; - #9DE4  basic commands high byte ------------
-L9DE4   !by >APPEND,>DELETE,>ENDTRACE,>FIND,>GENLINE,>HELP,>KILL,>LPAGE
-        !by >M_DUMP,>RENUMBER,>S_STEP,>TRACE,>V_DUMP,>UNDEF,>COMPACTOR,>RENEW
-
-	!align 255, 0, 0
-
-!pseudopc $DE00 {
-
-; thsi part will be mirrored to $DE00 ------------
-LDE00   DEC $01					; no cartridge, no BASIC ROM, RAM below readable
-
-        LDA ($5F),Y
-        PHA
-        INC $01					; activate cartridge and BASIC ROM
-        PLA
-        RTS
---------------------------------- 
-LDE09   STA $55					; set $55,
-LDE0B   JSR LDE16				; set $56 and JMP ($55) with module off
-        LDY #$80
-        STY LDE09				; module on, again
-        RTS
---------------------------------- 
-LDE14   STA $55
-LDE16   STY $56
-        LDY #$F2 
-        STY LDE14				; module off
-LDE1D   JMP ($0055)
---------------------------------- 
-LDE20   LDA #$04 
-        STA LDE20				; module on
-        JMP L8053				; direct mode: read BASIC line from keyboard and execute
---------------------------------- 
-LDE28   DEX
-        STX LDE28				; module off
-        JSR CRUNCH				; Crunch BASIC tockens (vector $0304)
-        JMP $A7E1				; start into interpreter loop (vector $0308)
---------------------------------- 
-LDE32   DEC $01					; no cartridge, no BASIC ROM, RAM below readable
-        LDA ($45),Y
-        PHA
-        INC $01					; activate cartridge and BASIC ROM
-        PLA
-        RTS
---------------------------------- 
-LDE3B   DEC $01					; no cartridge, no BASIC ROM, RAM below readable
-        LDA ($7A),Y
-        PHA
-        INC $01					; activate cartridge and BASIC ROM
-        PLA
-        RTS
---------------------------------- 
-LDE44   DEC $01					; no cartridge, no BASIC ROM, RAM below readable
-        LDA ($22),Y
-        PHA
-        INC $01					; activate cartridge and BASIC ROM
-        PLA
-        RTS
---------------------------------- 
-LDE4D   DEC $01					; no cartridge, no BASIC ROM, RAM below readable
-        CMP ($0B),Y
-        PHP
-        INC $01					; activate cartridge and BASIC ROM
-        PLP
-        RTS
---------------------------------- 
-	!fill 10, 0
---------------------------------- 
-LDE60   INC $7A					; increment CHRGET pointer
-        BNE +
-        INC $7B
-+
-LDE66   DEC $01					; no cartridge, no BASIC ROM, RAM below readable
-        JSR CHRGOT
-        PHP
-        INC $01					; activate cartridge and BASIC ROM
-        PLP
-        RTS
---------------------------------- 
-LDE70   DEC $01					; no cartridge, no BASIC ROM, RAM below readable
-        JSR SAVE
-        INC $01					; activate cartridge and BASIC ROM
-        RTS
---------------------------------- 
-; copy ($22) one byte up until $7a/$7b with module off
-LDE78   DEC $01					; no cartridge, no BASIC ROM, RAM below readable
--       LDA $22
-        BNE +
-        DEC $23
-+       DEC $22
-        LDY #$00 
-        LDA ($22),Y
-        INY
-        STA ($22),Y
-        LDA $22
-        CMP $7A
-        BNE -
-        LDA $23
-        CMP $7B
-        BNE -
-        INC $01					; activate cartridge and BASIC ROM
-        RTS
---------------------------------- 
-LDE98   LDA #$28 
-        STA LDE98				; module on
-        JMP L86AB				; continue TRACE
---------------------------------- 
-
-        !by $ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff
-
---------------------------------- 
-LDEA8   LDY #$44 
-        STY LDEA8
-        JMP L802B				; initialize the modul
---------------------------------- 
-; copy ($22) to ($24) X pages upwards with module off
-LDEB0   DEC $01					; no cartridge, no BASIC ROM, RAM below readable
--       LDA ($22),Y
-        STA ($24),Y
-        INY
-        BNE -
-        INC $23
-        INC $25
-        DEX
-        BNE -
-        INC $01					; activate cartridge and BASIC ROM
-        RTS
---------------------------------- 
-; copy ($22) one byte down until $2d/$2e with module off
-LDEC3   DEC $01					; no cartridge, no BASIC ROM, RAM below readable
--       LDY #$01 
-        LDA ($22),Y
-        DEY
-        STA ($22),Y
-        INC $22
-        BNE +
-        INC $23
-+       LDA $22
-        CMP $2D
-        BNE -
-        LDA $23
-        CMP $2E
-        BNE -
-        INC $01					; activate cartridge and BASIC ROM
-        RTS
---------------------------------- 
-LDEE1   LDA #$EE 
-        STA LDEE1				; module off
-        LDA #$00 
-        JSR LDE1D				; JMP ($55)
-        PHA					; keep return value
-        LDA #$F4 
-        STA LDEE1				; module on
-        PLA					; return A
-        RTS
---------------------------------- 
-}
-
-	!align 255, 0, 0
-
-L9F00   !by $09,$0B,$1B,$2B,$61,$7C,$98,$9D ;...+....
-        !by $0C,$21,$4B,$64,$93,$93,$10,$10 ;.!K.....
-        !by $11,$13,$13,$14,$15,$15,$12,$1C ;........
-        !by $1C,$53,$54,$61,$61,$9D,$9D,$14 ;.ST.....
-        !by $1B,$1B,$1B,$1B,$21,$21,$4B,$4B ;....!!KK
-        !by $73,$82,$82,$83,$83,$95,$95,$99 ;........
-        !by $99,$99,$A0,$A0,$A4,$A6,$A6,$A6 ;........
-
-L9F38   !by $06,$88,$60,$E4,$02,$82,$86,$02 ;........
-        !by $D8,$46,$86,$E4,$D8,$E4,$C6,$E6 ;.F......
-        !by $62,$52,$8A,$18,$86,$A6,$68,$30 ;.R.....0
-        !by $32,$60,$E4,$30,$32,$30,$32,$96 ;2..0202.
-        !by $06,$08,$12,$2C,$70,$72,$B0,$B2 ;...,....
-        !by $E0,$02,$20,$02,$20,$12,$26,$46 ;.. . .&F
-        !by $48,$52,$70,$72,$F0,$02,$26,$42 ;HR....&B
-
-L9F70   !by $61,$21,$C1,$41,$A1,$01,$E1,$81 ;.!.A....
-        !by $02,$C2,$E2,$42,$22,$62,$90,$B0 ;...B"...
-        !by $F0,$30,$D0,$10,$50,$70,$00,$1E ;.0..P...
-        !by $28,$0A,$14,$32,$3C,$46,$50,$00 ;(..2<FP.
-        !by $18,$D8,$58,$B8,$CA,$88,$E8,$C8 ;..X.....
-        !by $EA,$48,$08,$68,$28,$40,$60,$38 ;.H..(@.8
-        !by $F8,$78,$AA,$A8,$BA,$8A,$9A,$98 ;........
-
-L9FA8   !by $00,$24,$00,$2C,$00,$00,$00,$00 ;.$.,....
-        !by $00,$00,$00,$4C,$00,$4C,$00,$00 ;...L.L..
-        !by $00,$00,$6C,$00,$00,$20,$00,$20 ;..... . 
-        !by $00,$00,$00,$00,$00,$00,$00,$E4 ;........
-        !by $E0,$EC,$00,$00,$00,$00,$00,$00 ;........
-        !by $00,$C4,$C0,$CC,$00,$00,$00,$00 ;........
-        !by $00,$00,$00,$A6,$A2,$AE,$00,$00 ;........
-        !by $BE,$00,$00,$B6,$00,$A4,$A0,$AC ;........
-        !by $00,$B4,$00,$BC,$00,$00,$00,$86 ;........
-        !by $00,$8E,$00,$00,$00,$00,$00,$96 ;........
-        !by $00,$84,$00,$8C,$00,$94,$00,$00 ;........
+FILL4:  !fi     $a000-FILL4, $aa
