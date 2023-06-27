@@ -30,7 +30,7 @@ The screen message is changed to " *PRINT-TECHNIK-HELP-PLUS*", additonal compare
 <br />There are also other changes in other places, on which i did not do any further investigation.
 
 ### V4:
-The screen message is changed a liitle bit to "*PRINT-TECHNIK-HELP PLUS* ",
+The screen message is changed a little bit to "*PRINT-TECHNIK-HELP PLUS* ",
 There are some smal code changes applied in differnt are. This should be some improvements only.
 <br />Change a branch in the DUMP area.
 <br />Add some code to the RENUMBER part, a check for 'qoutes' is added.
