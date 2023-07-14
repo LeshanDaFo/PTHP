@@ -30,7 +30,7 @@ STROUT          = $AB1E
 FRMNUM          = $AD8A                         ; evaluate expression and check is numeric, else do type mismatch
 ERRFC           = $B248                         ; illegal quantity error
 GETADR          = $B7F7                         ; convert FAC_1 to integer in temporary integer
-ADD             = $BC49                         ; Addition
+FLOATC          = $BC49                         ; FLOAT UNSIGNED VALUE IN FAC+1,2
 INTOUT          = $BDCD                         ; Output Positive Integer in A/X
 INTOUT1         = $BDD1                         ; Output Positive Integer in A/X
 FLPSTR          = $BDDD                         ; Convert FAC#1 to ASCII String
@@ -168,7 +168,7 @@ L80DD   STA $63
         STY $62
 L80E1   LDX #$90 
         SEC
-        JSR ADD
+        JSR FLOATC
         JMP FLPSTR
 ; - #80EA  basic commands call ----------------- 
 BASCMD:  LDY     #$01 
@@ -3442,7 +3442,7 @@ L99D5   STA $62
         STX $63
         LDX #$90 
         SEC
-        JSR ADD
+        JSR FLOATC
         JSR FLPSTR
         LDY #$05 
         LDX #$FF 

@@ -33,7 +33,7 @@ FRMNUM          = $AD8A                         ; evaluate expression and check 
 SNERR           = $AF08                         ; handle syntax error
 ERRFC           = $B248                         ; illegal quantity error
 GETADR          = $B7F7                         ; convert FAC_1 to integer in temporary integer
-ADD             = $BC49                         ; Addition
+FLOATC          = $BC49                         ; FLOAT UNSIGNED VALUE IN FAC+1,2
 INTOUT          = $BDCD                         ; Output Positive Integer in A/X
 INTOUT1         = $BDD1                         ; Output Positive Integer in A/X
 FLPSTR          = $BDDD                         ; Convert FAC#1 to ASCII String
@@ -187,7 +187,7 @@ L8195:  sta     $63
         sty     $62
 L8199:  ldx     #$90
         sec
-        jsr     ADD
+        jsr     FLOATC
         jmp     FLPSTR
 ; ----------------------------------------------
 ; - #81A2  basic commands call -----------------
@@ -3109,7 +3109,7 @@ L98a4:  sta     $62
         stx     $63
         ldx     #$90
         sec
-        jsr     ADD
+        jsr     FLOATC
         jsr     FLPSTR
         ldy     #$05
         ldx     #$ff
