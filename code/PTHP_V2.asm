@@ -20,6 +20,7 @@ IONO            = $0131
 
 INLIN           = $A560                         ; call for BASIC input and return
 CRUNCH          = $A579                         ; crunch keywords into BASIC tokens
+CLEARC          = $A660                         ; basic command clear
 ISCNTC          = $A82C                         ; LISTEN FOR CONT-C
 CRDO            = $AAD7                         ; ;PRINT CRLF TO START WITH
 FRMNUM          = $ad8a                         ; evaluate expression and check is numeric, else do type mismatch
@@ -47,7 +48,7 @@ CLRCHN          = $FFCC                         ; Restore I/O Vector
 CHRIN           = $FFCF                         ; Input Vector
 CHROUT          = $FFD2                         ; Output Vector
 SAVE            = $FFD8                         ; Save Vector
-STOPT           = $FFE1                         ; Test STOP Vector
+STOP            = $FFE1                         ; Test STOP Vector
 NMI             = $FE5E                         ; NMI after found Modul
 GETIN           = $FFE4                         ; Vector: Kernal GETIN Routine
 
@@ -1374,7 +1375,7 @@ L8a54:  jsr     CRDO
 L8a57:  jsr     CLRCHN
         lda     $fc
         bne     L8a88
-L8a5e:  jsr     STOPT
+L8a5e:  jsr     STOP 
         beq     L8a88
         lda     $028e
         cmp     #$01
@@ -1718,7 +1719,7 @@ L8d05:  ldx     $0133
 -----------------------------------
 L8d0f:  jmp     ($00fb)
 -----------------------------------
-L8d12:  jsr     STOPT
+L8d12:  jsr     STOP 
         bne     L8d18
         rts
 ---------------------------------
@@ -3757,7 +3758,7 @@ L9ee7:  clc
         iny
 L9ef1:  sta     $2d
         sty     $2e
-        jsr     $a660
+        jsr     CLEARC                          ; basic command clear
         jmp     READY                           ; go handle error message
 -----------------------------------
 L9efb:  tya

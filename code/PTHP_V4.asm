@@ -24,6 +24,7 @@ IONO            = $0131
 
 INLIN           = $A560                         ; call for BASIC input and return
 CRUNCH          = $A579                         ; crunch keywords into BASIC tokens
+CLEARC          = $A660                         ; basic command clear
 ISCNTC          = $A82C                         ; LISTEN FOR CONT-C
 CLEARC          = $A660
 STXTP           = $A68E
@@ -55,7 +56,7 @@ CLRCHN          = $FFCC                         ; Restore I/O Vector
 CHRIN           = $FFCF                         ; Input Vector
 CHROUT          = $FFD2                         ; Output Vector
 SAVE            = $FFD8                         ; Save Vector
-STOPT           = $FFE1                         ; Test STOP Vector
+STOP            = $FFE1                         ; Test STOP Vector
 NMI             = $FE5E                         ; NMI after found Modul
 GETIN           = $FFE4                         ; Vector: Kernal GETIN Routine
 
@@ -1403,7 +1404,7 @@ L8A78   jsr     CRDO
 L8A7B   jsr     CLRCHN
         lda     $fc
         bne     L8AAC
-L8A82   jsr     STOPT
+L8A82   jsr     STOP 
         beq     L8AAC
         lda     $028e
         cmp     #$01
@@ -1747,7 +1748,7 @@ L8D29   ldx     $0133
 ---------------------------------
 L8D33   jmp     ($00fb)
 ---------------------------------
-L8D36   jsr     STOPT
+L8D36   jsr     STOP 
         bne     L8D3C
         rts
 ---------------------------------
@@ -3779,7 +3780,7 @@ L9EEC   clc
         iny
 L9EF6   sta     $2d
         sty     $2e
-        jsr     $a660
+        jsr     CLEARC                          ; basic command clear
         jmp     READY                           ; go handle error message
 ---------------------------------
 L9F00   tya

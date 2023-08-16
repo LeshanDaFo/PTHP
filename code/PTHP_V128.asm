@@ -52,7 +52,7 @@ CHRIN           = $FFCF                         ; Input Vector
 CHROUT          = $FFD2                         ; Output Vector
 LOAD            = $FFD5                         ; Load Vector
 SAVE            = $FFD8                         ; Save Vector
-STOPT           = $FFE1                         ; Test STOP Vector
+STOP            = $FFE1                         ; Test STOP Vector
 NMI             = $FE5E                         ; NMI after found Modul
 GETIN           = $FFE4                         ; Vector: Kernal GETIN Routine
 
@@ -190,7 +190,7 @@ L80FB   LDA L9DD4,X                             ; basic command low byte table
 ; - #810A  Matrix and Variable dump ------------
 ; ------- start $81B1 and $8274 ----------------
 ; ----------------------------------------------
-L810A   JSR STOPT				; stop pressed?
+L810A   JSR STOP 				; stop pressed?
         BEQ L8116
         LDA $028E
         CMP #$01 				; shift pressed?
@@ -1010,7 +1010,7 @@ L873C   TXA
         JSR CRDO
         BIT $0130				; trace flag set?
         BMI L8760
-L8752   JSR STOPT
+L8752   JSR STOP 
         BEQ L877B
         LDA $028E
         CMP #$01 

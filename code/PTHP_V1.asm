@@ -47,7 +47,7 @@ CLRCHN          = $FFCC                         ; Restore I/O Vector
 CHRIN           = $FFCF                         ; Input Vector
 CHROUT          = $FFD2                         ; Output Vector
 SAVE            = $FFD8                         ; Save Vector
-STOPT           = $FFE1                         ; Test STOP Vector
+STOP            = $FFE1                         ; Test STOP Vector
 NMI             = $FE5E                         ; NMI after found Modul
 GETIN           = $FFE4                         ; Vector: Kernal GETIN Routine
 
@@ -1378,7 +1378,7 @@ L8a54:  jsr     CRDO
 L8a57:  jsr     CLRCHN
         lda     $fc
         bne     L8a86
-L8a5e:  jsr     STOPT
+L8a5e:  jsr     STOP 
         beq     L8a86
         lda     $028e
         cmp     #$01
@@ -1716,7 +1716,7 @@ L8cfe:  ldx     $0133
 ---------------------------------
 L8d08:  jmp     ($00fb)
 ---------------------------------
-L8d0b:  jsr     STOPT
+L8d0b:  jsr     STOP 
         bne     L8d11
         rts
 ---------------------------------
