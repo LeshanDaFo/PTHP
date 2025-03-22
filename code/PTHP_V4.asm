@@ -10,7 +10,7 @@
 ; #  This source is available at:                               #
 ; #  https://github.com/LeshanDaFo/PTHP                         #
 ; #                                                             #
-; #  Special thanks goes to Diddle, a member of Forum64         #
+; #  Special thanks goes to Diddl, a member of Forum64          #
 ; #  https://www.forum64.de/wcf/index.php?user/6015-diddl/      #
 ; 3  who has provided the program for this version 4            #
 ; #                                                             #
